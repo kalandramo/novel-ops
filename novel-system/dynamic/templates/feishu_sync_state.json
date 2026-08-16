@@ -1,0 +1,9 @@
+{
+  "_description": "飞书同步状态文件。追踪小说内容同步到飞书文档的状态。initialized表示是否已初始化飞书文档，doc_url为飞书文档链接，last_sync_chapter为最后同步的章号，last_sync_trigger为最后同步触发方式，last_sync_time为最后同步时间，sync_errors记录同步错误。",
+  "initialized": false,
+  "doc_url": "",
+  "last_sync_chapter": 0,
+  "last_sync_trigger": "",
+  "last_sync_time": "",
+  "sync_errors": []
+}
