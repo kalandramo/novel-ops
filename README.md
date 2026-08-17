@@ -127,7 +127,6 @@ flowchart LR
 2. TRAE：**设置 → 技能与命令 → 创建 → 全局**，直接上传该 zip，确认后即在技能面板出现 `novelOps`。
 3. 或把解压目录复制到技能目录：`%userprofile%\.trae-cn\skills\novelOps`。
 
-完整分步教程见 [安装教程](docs/install.md)。
 
 新建小说项目目录，把 `novel-system/` 模板复制进去（若 `dynamic/` 为空，首次运行时 Agent 会自动从模板初始化）。
 
