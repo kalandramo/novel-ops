@@ -111,11 +111,11 @@ flowchart LR
 
 ## 快速开始
 
-> 完整分步安装教程（Windows · TRAE，含国内镜像、技能导入、首次运行）见 [安装教程](docs/install.md)。
 
 ### 环境要求
 
 - 任意支持 Skill 的 AI Agent（TRAE、Claude Code 等）
+- 指定下载包， 给agent下命令：“安装skill”
 - Python 3.10+（运行 `tools/` 下 3 个脚本）
 - 飞书同步为可选功能，未配置不阻塞创作
 
