@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 novel-writer skill 度量工具
-计算 L1 循环 B 组指标:σ²(句长方差) / TTR(用词多样性) / EGR(情感颗粒度比) / Pσ²(段落长度方差)
+计算章级指标:σ²/TTR/Pσ²/BurstCV/ParaCV/NgramRep/NgramUniq + 参考指标EGR/Cσ²/Iσ²/对话占比/标点CV
 
 用法:
   python metrics.py <章节文件.txt>
   python metrics.py <章节文件.txt> --json        # 输出 JSON
+  python metrics.py <章节文件.txt> --aitext      # 启用AITextDetector第二层参考检测
   python metrics.py <章节文件.txt> --fingerprint 指纹库.json  # 计算 FP 语言指纹匹配度
   python metrics.py <本章.txt> --compare <样本.txt>  # 模仿评价:对比两段文本指标差异
   python metrics.py <本章.txt> --plagiarism <样本.txt>  # 查重自检:检测连续8字以上雷同
@@ -15,18 +16,42 @@ novel-writer skill 度量工具
 依赖:
   pip install jieba
 
-门限阈值(skill 中定义,2026-08-01 调整):
-  σ²  >= 25    (AI<15, 人写>15)
-  TTR >= 0.25  (AI<0.15, 人写>0.15)
-  EGR <= 0.60  (AI>0.60, 人写<0.50)
-  Pσ² >= 80    (AI<50, 人写>50)
+=== 硬门禁指标(纯统计,不依赖词库) ===
+  σ²        >= 8      (AI<5, 人写>10)    — 句长标准差
+  TTR       >= 0.40   (AI<0.30, 人写>0.48) — 用词多样性
+  Pσ²       >= 20     (AI<12, 人写>28)    — 段长标准差
+  BurstCV   >= 0.40   (AI<0.30, 人写>0.50) — 句长变异系数(std/mean)
+  ParaCV    >= 0.30   (AI<0.20, 人写>0.40) — 段长变异系数
+  3gramRep  <= 0.08   (AI>0.10, 人写<0.06) — 3-gram重复率
+  3gramUniq >= 0.85   (AI<0.70, 人写>0.90) — 3-gram唯一率
+
+=== 参考指标(仅预警,不做硬门禁) ===
+  EGR       <= 2.0    (AI>5.0, 人写<1.0)  — 情感颗粒度比(依赖词库,易误判)
+  Cσ²       >= 0.15   (AI<0.05, 人写>0.25) — 过渡词密度方差(依赖词库)
+  Iσ²       >= 1.8    (AI<1.0, 人写>2.5)  — 信息密度方差
+  对话占比    5%-65%                      — 对话字符/总字符
+  标点CV    >= 0.30                      — 标点间距变异系数
+
+=== 其他指标 ===
   FP  >= 2次/章 (AI=0, 人写>3)
+  SC  >= 0.75  (AI<0.6, 人写>0.85)
+
+校准依据(2026-09-05 基于实测+文献+社区工程实践):
+  1. 实测样本: 番茄《长安食话》/晋江《攻玉》/晋江《太傅给我当牛马》
+     人写: σ²=17-21/TTR=0.52-0.66/Pσ²=20-25/BurstCV=0.53-0.59/ParaCV=0.44-0.59
+           3gramRep=0.039-0.048/3gramUniq=0.917-0.922
+     AI:   σ²=4.1/TTR=0.30/Pσ²=8.7/BurstCV=0.219/ParaCV=0.114
+           3gramRep=0.136/3gramUniq=0.567
+  2. 社区工程参考: 句长std 8-18(人写)/<6(AI); 段长CV 0.4-1.2(人写)/<0.3(AI)
+  3. Burstiness CV: 人写0.60-0.85, AI 0.15-0.30 (GPTZero/第三方检测器参考值)
+  4. 设计原则: 硬门禁指标不依赖词库,不受题材影响;参考指标依赖词库,易误判特定题材
 """
 
 import sys
 import re
 import json
 import math
+import os
 from collections import Counter
 
 try:
@@ -36,6 +61,16 @@ try:
 except ImportError:
     HAS_JIEBA = False
     print("警告: 未安装 jieba,TTR 将按字符计算(精度降低)。安装: pip install jieba", file=sys.stderr)
+
+try:
+    from aitext_detector.detector import AITextDetector as _AITextDetector
+    _aitext_model_path = os.path.join(os.path.dirname(__file__), 'aitext_detector', 'models.json')
+    _aitext_instance = None
+    HAS_AITEXT = True
+except ImportError:
+    HAS_AITEXT = False
+    _aitext_model_path = None
+    _aitext_instance = None
 
 
 # ============ 词库 ============
@@ -59,38 +94,86 @@ VAGUE_EMOTION_WORDS = {
 }
 
 # 具体感官词(人写常用,有身体反应)
-# 扩展至80+词,含川渝方言身体感受/美食感官/程序员术语
+# 2026-09-05: 基于番茄/晋江真实人写样本校准，补充常见身体反应短词
 SENSORY_WORDS = {
-    # 触觉
+    # 触觉(原有)
     "胃紧", "胃里发紧", "手凉", "手心发烫", "发抖", "颤抖", "发冷", "发热",
     "心跳加速", "心狂跳", "胸口发闷", "胸闷", "喘不过气", "呼吸困难",
     "嗓子发紧", "喉咙发紧", "声音发抖", "手心出汗", "出冷汗", "冒冷汗",
     "头皮发麻", "后背发凉", "脊背发凉", "膝盖发软", "腿软", "手脚冰凉",
-    # 视觉
+    # 视觉(原有)
     "视野发白", "眼前发黑", "眼眶发热", "视线模糊", "眼睛发酸",
-    # 听觉
+    # 听觉(原有)
     "耳鸣", "嗡嗡作响", "心脏狂跳",
-    # 味觉
+    # 味觉(原有)
     "嘴里发苦", "嘴里发甜", "舌根发涩",
-    # 综合
+    # 综合(原有)
     "全身僵硬", "身体绷紧", "肌肉紧绷", "牙关紧咬", "嘴唇发干",
-    # 川渝方言身体感受
+    # 川渝方言身体感受(原有)
     "脚杆打闪闪", "脑壳昏", "胃里翻", "手杆发软", "腿杆发酸",
     "眼皮跳", "脑壳痛", "太阳穴跳", "脸发烫", "耳朵发烫",
-    # 美食/味觉感官
+    # 美食/味觉感官(原有)
     "嘴巴发干", "舌头发麻", "嘴唇发烫", "喉咙发辣", "胃里发酸",
     "鼻子发酸", "脸颊发烫", "腮帮子发酸", "嗓子发辣", "舌根发苦",
     "胃里翻腾", "嘴里发涩", "喉咙发干", "嘴唇发白",
-    # 程序员术语(身体反应比喻)
+    # 程序员术语(身体反应比喻)(原有)
     "CPU烧了", "脑子宕机", "内存溢出", "思维卡顿", "系统崩溃",
     "某根弦断了", "死机", "蓝屏", "404", "报错",
+    # === 2026-09-05 新增：常见身体反应短词（基于真实样本校准）===
+    # 叹气类
+    "叹了口气", "叹了一口气", "叹气", "轻叹",
+    # 脸色变化
+    "脸红", "脸一红", "脸涨红", "脸通红", "脸泛红", "脸红了",
+    "脸白了", "脸色白", "脸色一白", "脸色苍白", "面色一白", "面白如纸",
+    "脸青", "脸色发青",
+    # 咬唇/咬牙
+    "咬唇", "咬了咬唇", "咬嘴唇", "咬紧牙", "咬了咬",
+    # 皱眉
+    "皱眉", "蹙眉", "拧眉", "皱了皱眉",
+    # 颤抖/颤动
+    "颤动", "微颤", "发颤",
+    # 攥紧/握拳
+    "攥紧", "握紧", "攥拳", "握拳", "捏紧",
+    # 吞咽
+    "吞咽", "咽了口", "咽了咽",
+    # 僵硬
+    "一僵", "僵硬", "身体僵", "脊背一僵",
+    # 呼吸
+    "深呼吸", "深吸了", "吸了口气", "倒吸一口",
+    # 嘴角
+    "嘴角抽", "嘴角扬", "嘴角扯", "嘴角一", "唇角一",
+    # 瞳孔
+    "瞳孔缩", "瞳孔一缩", "瞳孔放大",
+    # 手指
+    "手指颤", "手指发颤", "指尖发凉", "指尖冰凉",
+    # 眼部
+    "红了眼", "红了眼眶", "眼皮重", "眼皮打", "眼皮都快",
+    "眼底", "眼圈红", "眼尾",
+    # 松气
+    "松了口气", "松了一口气",
+    # 胃部
+    "胃袋", "胃里抽", "胃一紧",
+    # 其他常见
+    "脊背一", "后背一", "额角冒汗", "额头冒汗", "额头出汗",
+    "喉结滚", "喉结上下", "喉头滚",
+    "拳头攥", "双拳紧握",
+    "倒退一步", "后退一步", "踉跄",
 }
 
 # 过渡词/连接词(C 组指标用)
+# 2026-09-05: 补充网文常见过渡词(基于番茄/晋江样本校准)
 TRANSITION_WORDS = {
+    # 正式过渡词(原有)
     "然而", "因此", "于是", "不过", "所以", "但是", "虽然", "尽管",
     "与此同时", "换言之", "总而言之", "综上所述", "由此可见",
-    "换句话说", "不仅如此", "与此同时", "在此基础上",
+    "换句话说", "不仅如此", "在此基础上",
+    # 网文常见过渡词(新增)
+    "突然", "忽然", "猛地", "陡然", "骤然",
+    "随后", "紧接着", "接着",
+    "正当", "就在", "不料", "谁知", "哪知", "岂料",
+    "果然", "果不其然", "原来",
+    "此刻", "这一刻", "下一秒",
+    "只不过", "岂知", "哪曾想",
 }
 
 
@@ -156,10 +239,10 @@ def calc_egr(text):
     sensory_count = 0
     for word in SENSORY_WORDS:
         sensory_count += text.count(word)
-    # 防除零
+    # 防除零:2026-09-05修复,不再×10极端惩罚
+    # 3个笼统词+0感官词 → EGR=3(临界), 36个笼统词+0感官词 → EGR=36(AI区间)
     if sensory_count == 0:
-        # 没有感官词,如果有笼统词则 EGR 极高
-        return vague_count * 10 if vague_count > 0 else 0
+        return vague_count if vague_count > 0 else 0
     return vague_count / sensory_count
 
 
@@ -221,7 +304,7 @@ def calc_style_stability(chapter_metrics_list):
     """
     if len(chapter_metrics_list) < 3:
         return 1.0  # 章节太少无法判断,默认稳定
-    keys = ["sigma2", "ttr", "egr", "psigma2"]
+    keys = ["sigma2", "ttr", "burst_cv", "psigma2"]
     deviations = []
     for key in keys:
         values = [cm[key] for cm in chapter_metrics_list if key in cm]
@@ -259,7 +342,11 @@ def calc_transition_density_variance(paragraphs):
         counts.append(count)
     if len(counts) < 2:
         return 0
-    mean = sum(counts) / len(counts)
+    total = sum(counts)
+    if total == 0:
+        # 2026-09-05: 无过渡词时无法判断分布,设为最低通过值
+        return 0.15
+    mean = total / len(counts)
     variance = sum((c - mean) ** 2 for c in counts) / len(counts)
     return math.sqrt(variance)
 
@@ -281,62 +368,438 @@ def calc_fingerprint_match(text, fingerprint):
     return count, hits
 
 
+def calc_ngram_repetition(text, n=3):
+    """N-gram重复率:重复n-gram数/总n-gram数
+    不依赖词库,纯统计。AI文本倾向复用相同短语结构。
+    返回:(重复率, 唯一率)
+    """
+    clean = re.sub(r'[\s\n]+', '', text)
+    if len(clean) < n:
+        return 0.0, 1.0
+    ngrams = [clean[i:i+n] for i in range(len(clean)-n+1)]
+    total = len(ngrams)
+    if total == 0:
+        return 0.0, 1.0
+    counts = Counter(ngrams)
+    unique = len(counts)
+    repeated = sum(1 for c in counts.values() if c > 1)
+    return repeated / total, unique / total
+
+
+def calc_burstiness_cv(sentences):
+    """Burstiness CV:句长变异系数 = std/mean
+    GPTZero核心指标之一,衡量文本波动程度。
+    人写0.5-0.85+, AI 0.15-0.30
+    """
+    if not sentences:
+        return 0
+    lengths = [len(s) for s in sentences]
+    if len(lengths) < 2:
+        return 0
+    mean_l = sum(lengths) / len(lengths)
+    if mean_l == 0:
+        return 0
+    var_l = sum((l - mean_l) ** 2 for l in lengths) / len(lengths)
+    std_l = math.sqrt(var_l)
+    return std_l / mean_l
+
+
+def calc_paragraph_cv(paragraphs):
+    """段落长度CV:段长变异系数 = std/mean
+    社区参考:人写0.4-1.2, AI<0.3
+    """
+    if not paragraphs:
+        return 0
+    lengths = [len(p) for p in paragraphs]
+    if len(lengths) < 2:
+        return 0
+    mean_l = sum(lengths) / len(lengths)
+    if mean_l == 0:
+        return 0
+    var_l = sum((l - mean_l) ** 2 for l in lengths) / len(lengths)
+    std_l = math.sqrt(var_l)
+    return std_l / mean_l
+
+
+def calc_punctuation_rhythm_cv(text):
+    """标点节奏CV:标点间距的变异系数
+    衡量标点分布的均匀程度。AI标点间距更均匀(低CV)。
+    """
+    clean = re.sub(r'[\s\n]+', '', text)
+    # 找所有标点位置
+    punct_positions = [i for i, c in enumerate(clean) if c in '，。！？；：、…—']
+    if len(punct_positions) < 2:
+        return 0
+    # 计算相邻标点间距
+    intervals = []
+    prev = -1
+    for pos in punct_positions:
+        gap = pos - prev
+        if gap > 0:
+            intervals.append(gap)
+        prev = pos
+    if len(intervals) < 2:
+        return 0
+    mean_i = sum(intervals) / len(intervals)
+    if mean_i == 0:
+        return 0
+    var_i = sum((g - mean_i) ** 2 for g in intervals) / len(intervals)
+    std_i = math.sqrt(var_i)
+    return std_i / mean_i
+
+
+def calc_aitext_score(text, use_aitext=False):
+    """AITextDetector参考检测:7模型投票AI占比
+    需要 models.json (107MB) 和 aitext_detector 包
+    仅在 --aitext 模式下加载,默认不加载
+    """
+    if not HAS_AITEXT or not use_aitext:
+        return None
+    global _aitext_instance
+    if _aitext_instance is None:
+        if not os.path.exists(_aitext_model_path):
+            return None
+        _aitext_instance = _AITextDetector(_aitext_model_path)
+    return _aitext_instance.detect(text)
+
+
+# ============ Show Don't Tell 检测 ============
+
+# 情绪标签模式
+EMOTION_LABEL_PATTERNS = [
+    re.compile(r'她感到'),
+    re.compile(r'他感到'),
+    re.compile(r'心中涌起'),
+    re.compile(r'心中一阵'),
+    re.compile(r'感到一阵'),
+    re.compile(r'突然觉得'),
+    re.compile(r'觉得一阵'),
+    re.compile(r'内心涌起'),
+    re.compile(r'心头涌起'),
+    re.compile(r'心头一阵'),
+]
+
+# 思维动词
+THINK_VERB_PATTERNS = [
+    re.compile(r'她想到'),
+    re.compile(r'他想到'),
+    re.compile(r'她想着'),
+    re.compile(r'他想着'),
+    re.compile(r'她认为'),
+    re.compile(r'他认为'),
+    re.compile(r'她知道'),
+    re.compile(r'他知道'),
+    re.compile(r'她意识到'),
+    re.compile(r'他意识到'),
+]
+
+# 滤镜词
+FILTER_WORD_PATTERNS = [
+    re.compile(r'她看到'),
+    re.compile(r'他看到'),
+    re.compile(r'她听到'),
+    re.compile(r'他听到'),
+    re.compile(r'她感觉到'),
+    re.compile(r'他感觉到'),
+    re.compile(r'她注意到'),
+    re.compile(r'他注意到'),
+    re.compile(r'她发现'),
+    re.compile(r'他发现'),
+    re.compile(r'她看见'),
+    re.compile(r'他看见'),
+]
+
+# 弱化词
+WEAKENING_WORDS = {
+    "突然", "忽然", "非常", "十分", "极其", "相当", "颇", "甚",
+    "开始", "起来", "下去", "着了",
+    "really", "quite", "somewhat", "rather", "very", "suddenly",
+    "began to", "started to",
+}
+
+# 场景结尾总结模式
+SCENE_SUMMARY_PATTERNS = [
+    re.compile(r'她知道.*再一样'),
+    re.compile(r'一切都不'),
+    re.compile(r'从此.*不同'),
+    re.compile(r'这个夜晚.*漫长'),
+    re.compile(r'她明白.*改变'),
+    re.compile(r'一切.*开始了'),
+]
+
+
+def calc_telling_density(text):
+    """Show Don't Tell检测:5类Telling密度
+    返回: (telling总数, 各类计数dict, 密度)
+    """
+    sentences = split_sentences(text)
+    total_sentences = len(sentences)
+    if total_sentences == 0:
+        return 0, {}, 0.0
+
+    all_text = text
+    emotion_labels = sum(len(p.findall(all_text)) for p in EMOTION_LABEL_PATTERNS)
+    think_verbs = sum(len(p.findall(all_text)) for p in THINK_VERB_PATTERNS)
+    filter_words = sum(len(p.findall(all_text)) for p in FILTER_WORD_PATTERNS)
+    scene_summaries = sum(len(p.findall(all_text)) for p in SCENE_SUMMARY_PATTERNS)
+
+    clean = re.sub(r'[\s\n]+', '', text)
+    tokens = jieba.cut(clean) if HAS_JIEBA else list(clean)
+    weakening = sum(1 for w in tokens if w in WEAKENING_WORDS)
+
+    counts = {
+        "emotion_label": emotion_labels,
+        "think_verb": think_verbs,
+        "filter_word": filter_words,
+        "weakening": weakening,
+        "scene_summary": scene_summaries,
+    }
+    total = sum(counts.values())
+    density = total / total_sentences if total_sentences > 0 else 0
+    return total, counts, round(density, 3)
+
+
+def calc_concreteness_score(text):
+    """具体度评分:具体名词>抽象名词>通用词
+    返回: 0-10分, 10=高度具体
+    """
+    if not HAS_JIEBA:
+        return -1
+    clean = re.sub(r'[\s\n]+', '', text)
+    words = [w for w in jieba.cut(clean) if len(w) >= 2 and not re.match(r'^[\W_]+$', w)]
+    if not words:
+        return -1
+
+    concrete = sum(1 for w in words if w in SENSORY_WORDS)
+    abstract = sum(1 for w in words if w in VAGUE_EMOTION_WORDS)
+
+    concrete_ratio = concrete / len(words) if words else 0
+    abstract_ratio = abstract / len(words) if words else 0
+
+    score = concrete_ratio * 100 - abstract_ratio * 50
+    return round(max(0, min(10, score)), 1)
+
+
+# ============ AI模式检测 (来源: web-novel-writing-skill MIT + writers-second-brain Apache 2.0) ============
+
+# AI典型词汇(正则,用于子串匹配)
+AI_PATTERN_REGEXES = [
+    # 词汇层面:哲学废话
+    re.compile(r'在这个世界上'),
+    re.compile(r'不禁让人想起'),
+    re.compile(r'仿佛在诉说着什么'),
+    re.compile(r'这一刻，?时间仿佛静止'),
+    re.compile(r'命运的齿轮开始转动'),
+    re.compile(r'在历史的长河中'),
+    # 词汇层面:过度总结
+    re.compile(r'总而言之'),
+    re.compile(r'综上所述'),
+    re.compile(r'不得不说'),
+    re.compile(r'值得一提的是'),
+    re.compile(r'毫无疑问'),
+    # 词汇层面:情感过度
+    re.compile(r'内心深处涌起一股难以名状的感觉'),
+    re.compile(r'复杂的情感在心中交织'),
+    re.compile(r'百感交集'),
+    re.compile(r'一种说不清道不明的情绪'),
+    # 词汇层面:AI万能公式
+    re.compile(r'一股.*?涌上心头'),
+    re.compile(r'一股.*?涌遍全身'),
+    re.compile(r'心中暗道'),
+    re.compile(r'暗自想道'),
+    re.compile(r'嘴角微微上扬'),
+    re.compile(r'目光如炬'),
+    re.compile(r'浑身一震'),
+    re.compile(r'倒吸一口凉气'),
+    # 词汇层面:限用词(每章>1次即标记)
+    re.compile(r'不禁'),
+    re.compile(r'竟然'),
+    re.compile(r'居然'),
+    # 句式层面:万能开头
+    re.compile(r'随着.+?的.+?，.+?也'),
+    re.compile(r'他不知道的是'),
+    re.compile(r'如果.+?知道.+?的话，?一定'),
+    re.compile(r'仿佛.+?一般'),
+    re.compile(r'.+?的.+?，如同.+?一般'),
+    # 叙事层面:总结式叙事
+    re.compile(r'经过.+?的(苦修|努力|修炼|修炼).+?，.+?有了很大提升'),
+    re.compile(r'时光飞逝'),
+    re.compile(r'岁月如梭'),
+    re.compile(r'这就是.+?的世界吗'),
+    re.compile(r'果然，?强者的世界不同凡响'),
+]
+
+# AI典型叙事模式(正则)
+AI_NARRATIVE_REGEXES = [
+    re.compile(r'他感到(非常)?(愤怒|开心|悲伤|害怕|恐惧|高兴|难过|失望)'),
+    re.compile(r'她感到(非常)?(愤怒|开心|悲伤|害怕|恐惧|高兴|难过|失望)'),
+    re.compile(r'他(她)的(心|内心)(充满了|充斥着)(愤怒|悲伤|快乐|恐惧)'),
+    re.compile(r'(不禁)让人(感到|觉得)(震撼|惊叹|唏嘘)'),
+]
+
+
+def calc_ai_pattern_density(text):
+    """AI模式检测:基于反AI模式清单检测AI典型写作模式
+    来源: web-novel-writing-skill (MIT) + writers-second-brain (Apache 2.0)
+
+    返回: (总命中数, 各类命中dict, 密度, 命中详情列表)
+    """
+    sentences = split_sentences(text)
+    total_sentences = len(sentences)
+    if total_sentences == 0:
+        return 0, {}, 0.0, []
+
+    all_text = text
+    hits = []
+
+    # 检测AI典型词汇和句式
+    vocab_hits = 0
+    for pattern in AI_PATTERN_REGEXES:
+        matches = pattern.findall(all_text)
+        for m in matches:
+            vocab_hits += 1
+            hit_text = m if isinstance(m, str) else m[0] if isinstance(m, tuple) else str(m)
+            hits.append(("词汇/句式", pattern.pattern[:30], hit_text[:40]))
+
+    # 检测AI典型叙事
+    narrative_hits = 0
+    for pattern in AI_NARRATIVE_REGEXES:
+        matches = pattern.findall(all_text)
+        for m in matches:
+            narrative_hits += 1
+            hit_text = m if isinstance(m, str) else m[0] if isinstance(m, tuple) else str(m)
+            hits.append(("叙事模式", pattern.pattern[:30], hit_text[:40]))
+
+    # 检测连续代词开头(段落起手式雷同)
+    paragraphs = split_paragraphs(text)
+    pronoun_starts = 0
+    for i in range(len(paragraphs) - 2):
+        p1, p2, p3 = paragraphs[i], paragraphs[i+1], paragraphs[i+2]
+        s1 = p1[:2] if len(p1) >= 2 else p1
+        s2 = p2[:2] if len(p2) >= 2 else p2
+        s3 = p3[:2] if len(p3) >= 2 else p3
+        if s1 == s2 == s3 and s1 in ('他', '她', '我', '它'):
+            pronoun_starts += 1
+            hits.append(("段落起手雷同", "连续3段同代词开头", f"{s1}..."))
+
+    # 检测形容词堆砌(连续3+形容词修饰同一名词)
+    adj_stacking = len(re.findall(r'[大到小美丽动人令人心醉的]{2,}', all_text))
+    if adj_stacking > 0:
+        hits.append(("形容词堆砌", "3+形容词连续", f"命中{adj_stacking}处"))
+
+    counts = {
+        "vocab_sentence": vocab_hits,
+        "narrative": narrative_hits,
+        "pronoun_start": pronoun_starts,
+        "adj_stacking": adj_stacking,
+    }
+    total = sum(counts.values())
+    density = total / total_sentences if total_sentences > 0 else 0
+    return total, counts, round(density, 3), hits
+
+
 # ============ 门限判定 ============
 
 THRESHOLDS = {
-    "sigma2":      {"min": 25,   "ai": "<15",   "human": ">15"},
-    "ttr":         {"min": 0.25, "ai": "<0.15",  "human": ">0.15"},
-    "egr":         {"max": 0.60, "ai": ">0.60",  "human": "<0.50"},
-    "psigma2":     {"min": 80,   "ai": "<50",   "human": ">50"},
-    "csigma2":     {"min": 1.0,  "ai": "<0.5",  "human": ">1.5"},
-    "isigma2":     {"min": 1.8,  "ai": "<1.0",  "human": ">2.5"},
-    "fp":          {"min": 2,    "ai": "=0",    "human": ">3"},
-    "sc":          {"min": 0.75, "ai": "<0.6",  "human": ">0.85"},
+    # === 硬门禁指标(纯统计,不依赖词库) ===
+    "sigma2":        {"min": 8,     "ai": "<5",     "human": ">10"},
+    "ttr":           {"min": 0.40, "ai": "<0.30",  "human": ">0.48"},
+    "psigma2":       {"min": 20,   "ai": "<12",    "human": ">28"},
+    "burst_cv":      {"min": 0.40, "ai": "<0.30",  "human": ">0.50"},
+    "para_cv":       {"min": 0.30, "ai": "<0.20",  "human": ">0.40"},
+    "ngram3_rep":    {"max": 0.08, "ai": ">0.10",  "human": "<0.06"},
+    "ngram3_uniq":   {"min": 0.85, "ai": "<0.70",  "human": ">0.90"},
+    # === 参考指标(不做硬门禁,仅预警) ===
+    "egr":           {"max": 2.0,  "ai": ">5.0",   "human": "<1.0",  "reference": True},
+    "csigma2":       {"min": 0.15, "ai": "<0.05",  "human": ">0.25", "reference": True},
+    "isigma2":       {"min": 1.8,  "ai": "<1.0",   "human": ">2.5",  "reference": True},
+    "dialog_ratio":  {"min": 0.05, "max": 0.65, "reference": True},
+    "punct_cv":      {"min": 0.30, "reference": True},
+    "telling_total": {"max": 5,    "ai": ">10",    "human": "<3",    "reference": True},
+    "telling_density": {"max": 0.15, "ai": ">0.25", "human": "<0.08", "reference": True},
+    "concreteness":  {"min": 1.0, "ai": "<0.5",   "human": ">2.0",  "reference": True},
+    "ai_pattern_total":   {"max": 3,    "ai": ">8",     "human": "<2",  "reference": True},
+    "ai_pattern_density": {"max": 0.05, "ai": ">0.15",  "human": "<0.03", "reference": True},
+    # === 其他指标 ===
+    "fp":            {"min": 2,    "ai": "=0",     "human": ">3"},
+    "sc":            {"min": 0.75, "ai": "<0.6",   "human": ">0.85"},
 }
 
 
 def check_threshold(name, value):
-    """检查指标是否达标,返回 (通过, 状态)"""
+    """检查指标是否达标,返回 (通过, 状态)
+    参考指标(reference)始终通过,仅显示状态
+    范围型指标(min+max)需同时满足上下限
+    """
     t = THRESHOLDS.get(name)
     if not t:
         return True, "未知指标"
+
+    is_reference = t.get("reference", False)
+
+    # 范围型指标(如dialog_ratio: 5%-65%)
+    if "min" in t and "max" in t:
+        if t["min"] <= value <= t["max"]:
+            return True, "✅ 正常区间" if not is_reference else "ℹ️ 正常"
+        elif value < t["min"]:
+            return not is_reference, "⚠️ 偏低" if not is_reference else "ℹ️ 偏低"
+        else:
+            return not is_reference, "⚠️ 偏高" if not is_reference else "ℹ️ 偏高"
+
+    # min 型指标
     if "min" in t:
         if value >= t["min"]:
-            if value >= float(t["human"].lstrip(">")):
+            if "human" in t and value >= float(t["human"].lstrip(">")):
                 return True, "✅ 人写区间"
             return True, "✅ 达标"
-        elif value < float(t["ai"].lstrip("<").lstrip("=")):
-            return False, "❌ AI区间"
+        elif "ai" in t and value < float(t["ai"].lstrip("<").lstrip("=")):
+            return False if not is_reference else True, "❌ AI区间" if not is_reference else "⚠️ AI区间(参考)"
         else:
-            return False, "⚠️ 临界"
-    else:  # max 类型(egr)
+            return False if not is_reference else True, "⚠️ 临界" if not is_reference else "⚠️ 临界(参考)"
+
+    # max 型指标(如egr, ngram3_rep)
+    if "max" in t:
         if value <= t["max"]:
-            if value <= float(t["human"].lstrip("<")):
+            if "human" in t and value <= float(t["human"].lstrip("<")):
                 return True, "✅ 人写区间"
             return True, "✅ 达标"
-        elif value > float(t["ai"].lstrip(">")):
-            return False, "❌ AI区间"
+        elif "ai" in t and value > float(t["ai"].lstrip(">")):
+            return False if not is_reference else True, "❌ AI区间" if not is_reference else "⚠️ AI区间(参考)"
         else:
-            return False, "⚠️ 临界"
+            return False if not is_reference else True, "⚠️ 临界" if not is_reference else "⚠️ 临界(参考)"
+
+    return True, "未知"
 
 
 # ============ 纠正建议 ============
 
 CORRECTIONS = {
-    "sigma2":  "σ²<25 → 句式过于单调:插入短句(3-5字)打断节奏,或将长句拆为两句,制造长短句交替",
-    "ttr":     "TTR<0.25 → 用词过于集中:替换高频词的30%为同义词,加入个人习惯用语",
-    "egr":     "EGR>0.60 → 情感笼统:将笼统词替换为具体感官描写(胃紧/手凉/视野发白),使用川渝方言/美食/程序员术语增强细腻度",
-    "psigma2": "Pσ²<80 → 段落过于均匀:合并或拆分段落,制造长短段交替,优化手机阅读体验",
-    "csigma2": "Cσ²<1.0 → 过渡词均匀:删除30%过渡词,改为直接跳转",
-    "isigma2": "Iσ²<1.8 → 信息均匀:识别信息最稀疏的段加细节,信息最密集的段拆分留白",
-    "fp":      "FP<2 → 缺个人指纹:植入口头禅/标志性动作,每章至少2次",
-    "sc":      "SC<0.75 → 文风漂移:识别漂移最大的章节,以稳定章节为基准重写",
+    "sigma2":      "σ²<8 → 句式过于单调:插入短句(3-5字)打断节奏,或将长句拆为两句,制造长短句交替",
+    "ttr":         "TTR<0.40 → 用词过于集中:替换高频词的30%为同义词,加入个人习惯用语",
+    "psigma2":     "Pσ²<20 → 段落过于均匀:合并或拆分段落,制造长短段交替,优化手机阅读体验",
+    "burst_cv":    "BurstCV<0.40 → 句式波动不足:AI文本句长过于均匀,插入极短句(2-4字)和长句交替",
+    "para_cv":     "ParaCV<0.30 → 段落节奏均匀:AI文本段长过于统一,制造长短段差异(1行段+5行段交替)",
+    "ngram3_rep":  "3gramRep>8% → 短语重复过多:AI倾向复用相同结构,替换重复短语的表达方式",
+    "ngram3_uniq": "3gramUniq<85% → 3-gram唯一率低:AI文本短语多样性不足,增加句式和用词变化",
+    "egr":         "EGR>2.0 → 情感笼统(参考):将笼统词替换为具体感官描写,此指标仅供参考不做硬门禁",
+    "csigma2":     "Cσ²<0.15 → 过渡词分布均匀(参考):此指标仅供参考,不做硬门禁",
+    "isigma2":     "Iσ²<1.8 → 信息密度均匀(参考):此指标仅供参考,不做硬门禁",
+    "dialog_ratio":"对话占比异常(参考):正常范围5%-65%,过高或过低都需检查叙事结构",
+    "punct_cv":    "标点节奏CV低(参考):AI标点间距过于均匀,变化标点使用节奏",
+    "telling_total": "Telling总数>5(参考):Show Don't Tell违规过多,将情绪标签改为身体反应,删除滤镜词",
+    "telling_density": "Telling密度>15%(参考):AI典型写法密度过高,参考R1-R5约束改写",
+    "concreteness": "具体度<1.0(参考):抽象词过多,增加具体名词和感官细节",
+    "ai_pattern_total":   "AI模式总数>3(参考):检测到AI典型写法,参考anti-ai-patterns.md改写",
+    "ai_pattern_density": "AI模式密度>5%(参考):AI写法密度过高,参考Humanizer管道3-Pass去AI化",
+
+    "fp":          "FP<2 → 缺个人指纹:植入口头禅/标志性动作,每章至少2次",
+    "sc":          "SC<0.75 → 文风漂移:识别漂移最大的章节,以稳定章节为基准重写",
 }
 
 
 # ============ 主函数 ============
 
-def analyze(text, fingerprint=None):
+def analyze(text, fingerprint=None, use_aitext=False):
     """分析文本,返回完整报告"""
     sentences = split_sentences(text)
     paragraphs = split_paragraphs(text)
@@ -348,38 +811,77 @@ def analyze(text, fingerprint=None):
     csigma2 = calc_transition_density_variance(paragraphs)
     isigma2 = calc_info_density_variance(paragraphs)
 
+    burst_cv = calc_burstiness_cv(sentences)
+    para_cv = calc_paragraph_cv(paragraphs)
+    ngram3_rep, ngram3_uniq = calc_ngram_repetition(text, n=3)
+    dialog_ratio = calc_dialogue_ratio(text)
+    punct_cv = calc_punctuation_rhythm_cv(text)
+    telling_total, telling_counts, telling_density = calc_telling_density(text)
+    concreteness = calc_concreteness_score(text)
+    ai_pattern_total, ai_pattern_counts, ai_pattern_density, ai_pattern_hits = calc_ai_pattern_density(text)
+
     result = {
         "char_count": len(text),
         "sentence_count": len(sentences),
         "paragraph_count": len(paragraphs),
         "metrics": {
-            "sigma2":  round(sigma2, 1),
-            "ttr":     round(ttr, 3),
-            "egr":     round(egr, 2),
-            "psigma2": round(psigma2, 1),
-            "csigma2": round(csigma2, 2),
-            "isigma2": round(isigma2, 2),
+            "sigma2":      round(sigma2, 1),
+            "ttr":         round(ttr, 3),
+            "psigma2":     round(psigma2, 1),
+            "burst_cv":    round(burst_cv, 3),
+            "para_cv":     round(para_cv, 3),
+            "ngram3_rep":  round(ngram3_rep, 4),
+            "ngram3_uniq": round(ngram3_uniq, 4),
+            "egr":         round(egr, 2),
+            "csigma2":     round(csigma2, 2),
+            "isigma2":     round(isigma2, 2),
+            "dialog_ratio": round(dialog_ratio, 3),
+            "punct_cv":    round(punct_cv, 3),
+            "telling_total": telling_total,
+            "telling_density": telling_density,
+            "telling_breakdown": telling_counts,
+            "concreteness": concreteness,
+            "ai_pattern_total": ai_pattern_total,
+            "ai_pattern_density": ai_pattern_density,
+            "ai_pattern_breakdown": ai_pattern_counts,
+            "ai_pattern_hits": ai_pattern_hits,
         },
         "thresholds": THRESHOLDS,
         "checks": {},
         "corrections": [],
     }
 
-    # 检查 B 组指标
-    for name in ["sigma2", "ttr", "egr", "psigma2"]:
+    # 硬门禁指标(不通过则拒绝)
+    hard_gates = ["sigma2", "ttr", "psigma2", "burst_cv", "para_cv", "ngram3_rep", "ngram3_uniq"]
+    for name in hard_gates:
         value = result["metrics"][name]
         passed, status = check_threshold(name, value)
         result["checks"][name] = {"value": value, "status": status, "passed": passed}
         if not passed:
-            result["corrections"].append(CORRECTIONS[name])
+            result["corrections"].append(CORRECTIONS.get(name, ""))
 
-    # 检查 C 组指标(卷级)
-    for name in ["csigma2", "isigma2"]:
+    # 参考指标(仅预警,不拒绝)
+    reference_metrics = ["egr", "csigma2", "isigma2", "dialog_ratio", "punct_cv", "telling_total", "telling_density", "concreteness", "ai_pattern_total", "ai_pattern_density"]
+    for name in reference_metrics:
         value = result["metrics"][name]
         passed, status = check_threshold(name, value)
-        result["checks"][name] = {"value": round(value, 2), "status": status, "passed": passed}
-        if not passed:
-            result["corrections"].append(CORRECTIONS[name])
+        result["checks"][name] = {"value": value, "status": status, "passed": passed, "reference": True}
+        if not passed and "ai" in THRESHOLDS.get(name, {}):
+            result["corrections"].append(CORRECTIONS.get(name, ""))
+
+    # AITextDetector参考检测(可选,需要--aitext模式)
+    if use_aitext:
+        aitext_result = calc_aitext_score(text, use_aitext=True)
+        if aitext_result:
+            result["checks"]["aitext"] = {
+                "value": aitext_result.get("ai_percent", 0),
+                "status": "✅ 人写" if aitext_result["verdict"] == "human" else ("⚠️ 可能AI(参考)" if "maybe" in aitext_result["verdict"] else "❌ AI(参考)"),
+                "passed": aitext_result["verdict"] == "human",
+                "reference": True,
+                "detail": f"{aitext_result['ai_chunk_count']}/{aitext_result['chunk_count']}句被标记",
+            }
+            result["metrics"]["aitext_ai_percent"] = aitext_result.get("ai_percent", 0)
+            result["metrics"]["aitext_verdict"] = aitext_result["verdict"]
 
     # 语言指纹(FP)
     if fingerprint:
@@ -395,41 +897,84 @@ def analyze(text, fingerprint=None):
 def format_report(result):
     """格式化为可读报告"""
     lines = []
-    lines.append("=" * 50)
+    lines.append("=" * 60)
     lines.append("人写特征度量报告")
-    lines.append("=" * 50)
+    lines.append("=" * 60)
     lines.append(f"字数: {result['char_count']}  句数: {result['sentence_count']}  段数: {result['paragraph_count']}")
     lines.append("")
 
-    lines.append("【B组 章级指标】")
-    for name in ["sigma2", "ttr", "egr", "psigma2"]:
-        c = result["checks"][name]
-        lines.append(f"  {c['status']}  {name:8s} = {c['value']}")
+    lines.append("【硬门禁指标】(不通过则拒绝入库)")
+    hard_gates = ["sigma2", "ttr", "psigma2", "burst_cv", "para_cv", "ngram3_rep", "ngram3_uniq"]
+    labels = {
+        "sigma2": "σ²(句长方差)", "ttr": "TTR(用词多样性)", "psigma2": "Pσ²(段长方差)",
+        "burst_cv": "BurstCV(句长变异系数)", "para_cv": "ParaCV(段长变异系数)",
+        "ngram3_rep": "3gramRep(重复率)", "ngram3_uniq": "3gramUniq(唯一率)",
+    }
+    for name in hard_gates:
+        if name in result["checks"]:
+            c = result["checks"][name]
+            label = labels.get(name, name)
+            lines.append(f"  {c['status']}  {label:24s} = {c['value']}")
     lines.append("")
 
-    lines.append("【C组 卷级指标】")
-    for name in ["csigma2", "isigma2"]:
-        c = result["checks"][name]
-        lines.append(f"  {c['status']}  {name:8s} = {c['value']}")
+    lines.append("【参考指标】(仅预警,不做硬门禁)")
+    ref_metrics = ["egr", "csigma2", "isigma2", "dialog_ratio", "punct_cv", "telling_total", "telling_density", "concreteness", "ai_pattern_total", "ai_pattern_density"]
+    ref_labels = {
+        "egr": "EGR(情感颗粒度)", "csigma2": "Cσ²(过渡词方差)",
+        "isigma2": "Iσ²(信息密度方差)", "dialog_ratio": "对话占比",
+        "punct_cv": "标点节奏CV",
+        "telling_total": "Telling总数(Show&Tell)", "telling_density": "Telling密度",
+        "concreteness": "具体度评分",
+        "ai_pattern_total": "AI模式总数(反AI检测)", "ai_pattern_density": "AI模式密度",
+    }
+    for name in ref_metrics:
+        if name in result["checks"]:
+            c = result["checks"][name]
+            label = ref_labels.get(name, name)
+            lines.append(f"  {c['status']}  {label:24s} = {c['value']}")
+    if "aitext" in result["checks"]:
+        c = result["checks"]["aitext"]
+        lines.append(f"  {c['status']}  {'AITextDetector(AI占比)':24s} = {c['value']}%  {c.get('detail','')}")
     lines.append("")
+
+    # AI模式命中详情
+    if "ai_pattern_total" in result.get("checks", {}) and result["checks"]["ai_pattern_total"]["value"] > 0:
+        lines.append("【AI模式命中详情】(参考anti-ai-patterns.md)")
+        hits = result["metrics"].get("ai_pattern_hits", [])
+        for h_type, h_pattern, h_text in hits[:10]:
+            lines.append(f"  • [{h_type}] {h_text}")
+        if len(hits) > 10:
+            lines.append(f"  ... 还有{len(hits)-10}处")
+        lines.append("")
 
     if "fp" in result["checks"]:
         c = result["checks"]["fp"]
         lines.append("【语言指纹】")
-        lines.append(f"  {c['status']}  fp       = {c['value']}次")
+        lines.append(f"  {c['status']}  FP(指纹匹配)              = {c['value']}次")
         if c.get("hits"):
             for phrase, cnt in c["hits"].items():
                 lines.append(f"           命中: \"{phrase}\" x{cnt}")
         lines.append("")
 
+    # 统计硬门禁通过情况
+    hard_pass = sum(1 for n in hard_gates if n in result["checks"] and result["checks"][n]["passed"])
+    hard_total = sum(1 for n in hard_gates if n in result["checks"])
+
     if result["corrections"]:
         lines.append("【纠正建议】")
         for i, corr in enumerate(result["corrections"], 1):
-            lines.append(f"  {i}. {corr}")
+            if corr:
+                lines.append(f"  {i}. {corr}")
+        lines.append("")
+        lines.append(f"硬门禁通过: {hard_pass}/{hard_total}")
+        if hard_pass < hard_total:
+            lines.append(f"❌ {hard_total - hard_pass}项硬门禁未通过,需重写")
+        else:
+            lines.append("✅ 硬门禁全部通过(参考指标有预警)")
     else:
-        lines.append("【结论】全部指标达标,可以入库。")
+        lines.append(f"【结论】硬门禁 {hard_pass}/{hard_total} 全部通过,可以入库。")
 
-    lines.append("=" * 50)
+    lines.append("=" * 60)
     return "\n".join(lines)
 
 
@@ -475,15 +1020,16 @@ def compare_texts(text_a, text_b, label_a="本章", label_b="样本"):
         comparison["evaluation"]["ttr"] = "❌ 用词多样性不足"
         comparison["score"] -= 25
 
-    # EGR 对比:本章≤样本 达标
-    comparison["diff"]["egr_diff"] = round(ma["egr"] - mb["egr"], 2)
-    if ma["egr"] <= mb["egr"]:
-        comparison["evaluation"]["egr"] = "✅ 达标"
-    elif ma["egr"] <= mb["egr"] + 0.5:
-        comparison["evaluation"]["egr"] = "⚠️ 临界"
+    # BurstCV 对比:差值<0.2 达标
+    diff_burst = abs(ma["burst_cv"] - mb["burst_cv"])
+    comparison["diff"]["burst_cv"] = round(diff_burst, 3)
+    if diff_burst < 0.2:
+        comparison["evaluation"]["burst_cv"] = "✅ 达标"
+    elif diff_burst < 0.3:
+        comparison["evaluation"]["burst_cv"] = "⚠️ 临界"
         comparison["score"] -= 10
     else:
-        comparison["evaluation"]["egr"] = "❌ 情感过于笼统"
+        comparison["evaluation"]["burst_cv"] = "❌ 句式波动差异大"
         comparison["score"] -= 25
 
     # Pσ² 对比:差值<100 达标
@@ -518,7 +1064,7 @@ def format_compare_report(comparison, label_a="本章", label_b="样本"):
     rows = [
         ("σ²",     "sigma2",  "abs_diff"),
         ("TTR",    "ttr",     "ratio"),
-        ("EGR",    "egr",     "signed_diff"),
+        ("BurstCV","burst_cv","abs_diff"),
         ("Pσ²",    "psigma2", "abs_diff"),
     ]
 
@@ -532,11 +1078,13 @@ def format_compare_report(comparison, label_a="本章", label_b="样本"):
             diff_val = comparison["diff"].get("egr_diff", 0)
             diff_str = f"{diff_val:+.2f}"
         else:
-            diff_key = key if key != "sigma2" else "sigma2"
-            diff_val = comparison["diff"].get(diff_key, 0)
-            diff_str = f"{diff_val:.1f}"
+            diff_val = comparison["diff"].get(key, 0)
+            if key in ("burst_cv",):
+                diff_str = f"{diff_val:.3f}"
+            else:
+                diff_str = f"{diff_val:.1f}"
         eval_str = comparison["evaluation"].get(key, "")
-        lines.append(f"{label:8s}  {va:10.2f}  {vb:10.2f}  {diff_str:>10s}  {eval_str}")
+        lines.append(f"{label:8s}  {va:10.3f}  {vb:10.3f}  {diff_str:>10s}  {eval_str}")
 
     lines.append("")
     lines.append(f"模仿相似度评分: {comparison['score']}/100")
@@ -676,7 +1224,7 @@ def detect_homogenization(chapter_files):
 
     # 3. 指标趋势(线性回归斜率)
     metric_trend = {}
-    for key in ["sigma2", "ttr", "egr", "psigma2"]:
+    for key in ["sigma2", "ttr", "burst_cv", "psigma2"]:
         values = [r["metrics"][key] for r in results if "metrics" in r]
         if len(values) >= 3:
             n_vals = len(values)
@@ -692,10 +1240,10 @@ def detect_homogenization(chapter_files):
                     "detail": f"{key} 持续下降(斜率{slope:.2f}),警惕文风退化",
                     "severity": "high",
                 })
-            if key == "egr" and slope > 0.1:
+            if key == "burst_cv" and slope < -0.02:
                 issues.append({
-                    "type": "egr_rising",
-                    "detail": f"EGR 持续上升(斜率{slope:.2f}),情感描写趋于笼统",
+                    "type": "burst_cv_declining",
+                    "detail": f"BurstCV 持续下降(斜率{slope:.2f}),句式波动减弱,趋于AI化",
                     "severity": "medium",
                 })
 
@@ -740,12 +1288,12 @@ PERTURB_ACTIONS = {
     ],
     "metric_decline": [
         ("短句穿插", "在长段中插入3-5字短句,提升\u03c3\u00b2"),
-        ("感官词注入", "在情绪段加入触觉/听觉描写,降低EGR"),
+        ("长短交替", "刻意制造3字短句和30字长句交替,提升BurstCV"),
         ("段落重组", "合并短段或拆分长段,制造长短段交替,提升P\u03c3\u00b2"),
     ],
-    "egr_rising": [
-        ("感官替换", "搜索笼统情感词,替换为身体反应描写"),
-        ("触觉优先", "本章情绪段优先用触觉(胃紧/手凉/心跳)"),
+    "burst_cv_declining": [
+        ("短句穿插", "在长段中插入2-4字极短句,提升句式波动"),
+        ("长短交替", "刻意制造3字短句和30字长句的交替节奏"),
     ],
     "mid_stagnation": [
         ("主线扰动", "注入一个改变主线走向的小事件"),
@@ -837,6 +1385,7 @@ def main():
 
     filepath = sys.argv[1]
     output_json = "--json" in sys.argv
+    use_aitext = "--aitext" in sys.argv
 
     # 对比模式:--compare <样本文件>
     compare_path = None
@@ -958,7 +1507,7 @@ def main():
         else:
             print(format_perturb_report(report, suggestions))
     else:
-        result = analyze(text_a, fingerprint)
+        result = analyze(text_a, fingerprint, use_aitext=use_aitext)
         if output_json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

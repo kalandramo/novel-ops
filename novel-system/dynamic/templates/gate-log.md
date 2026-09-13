@@ -30,7 +30,7 @@
 | G1 | 连续性检查 | 写前加载 | 伏笔/角色状态/已确立事实/套路冷却/钩子/情感/副线一致性 | foreshadowing.md, character-state.md, established-facts.md, used-tropes.md, next-hook.md, emotion-beat.md, subplot-tracker.md | gate-log.md |
 | G2 | 合规检查 | 写后 | 字数/爽点频率/爆点频率/憋屈章数/钩子/AI比例/意识形态/医美专业度/敏感内容 | compliance-log.md | gate-log.md |
 | G3 | 风险预警 | 写后 | 伏笔超期/套路冷却/钩子逾期/副线出场频率 | foreshadowing.md, used-tropes.md, next-hook.md, subplot-tracker.md | gate-log.md |
-| G4 | 语言指纹 | 写后 | AI味检测：σ²/TTR/EGR/Pσ² | fingerprint.json, sample-library.md | gate-log.md |
+| G4 | 语言指纹 | 写后 | AI味检测：σ²/TTR/Pσ²/BurstCV/Ngram | fingerprint.json, sample-library.md | gate-log.md |
 | G5 | 情感弧线 | 写后 | 情感连续性/代偿/同方向预警 | emotion-beat.md | gate-log.md |
 | G6 | 副线健康 | 写后 | 副线出场频率/进度/线索回收 | subplot-tracker.md | gate-log.md |
 | G7 | 章末检查 | 写后 | 钩子部署/节奏控制/承上启下 | next-hook.md | gate-log.md |

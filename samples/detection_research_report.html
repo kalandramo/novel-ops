@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI文本检测方案调研报告</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --card: #1a1d29;
+  --border: #2d3142;
+  --text: #e0e0e0;
+  --dim: #8892a6;
+  --accent: #4ec9b0;
+  --warn: #f0a44c;
+  --danger: #e06c75;
+  --ok: #98c379;
+  --blue: #61afef;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+  line-height: 1.7;
+  padding: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+h1 { font-size: 1.8em; margin: 20px 0 10px; color: var(--accent); }
+h2 { font-size: 1.4em; margin: 30px 0 15px; color: var(--blue); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+h3 { font-size: 1.15em; margin: 20px 0 10px; color: var(--warn); }
+p { margin: 8px 0; color: var(--text); }
+ul, ol { margin: 8px 0 8px 20px; }
+li { margin: 4px 0; }
+code {
+  background: #2d3142;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--accent);
+}
+pre {
+  background: #1a1d29;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  color: var(--text);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.92em;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+th { background: #232636; color: var(--accent); font-weight: 600; }
+td { color: var(--text); }
+tr:nth-child(even) td { background: #1a1d29; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 12px 0;
+}
+.card-ok { border-left: 4px solid var(--ok); }
+.card-warn { border-left: 4px solid var(--warn); }
+.card-danger { border-left: 4px solid var(--danger); }
+.card-blue { border-left: 4px solid var(--blue); }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 600;
+  margin-left: 6px;
+}
+.badge-ok { background: rgba(152,195,121,0.2); color: var(--ok); }
+.badge-warn { background: rgba(240,164,76,0.2); color: var(--warn); }
+.badge-danger { background: rgba(224,108,117,0.2); color: var(--danger); }
+.badge-blue { background: rgba(97,175,239,0.2); color: var(--blue); }
+.tag {
+  display: inline-block;
+  background: rgba(78,201,176,0.15);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  margin: 2px;
+}
+.summary-box {
+  background: linear-gradient(135deg, rgba(78,201,176,0.1), rgba(97,175,239,0.1));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 20px 0;
+}
+.tier {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--card);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.tier-num {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+.tier-1 .tier-num { background: rgba(152,195,121,0.2); color: var(--ok); }
+.tier-2 .tier-num { background: rgba(240,164,76,0.2); color: var(--warn); }
+.tier-3 .tier-num { background: rgba(97,175,239,0.2); color: var(--blue); }
+.tier-content { flex: 1; }
+.tier-title { font-weight: 600; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>AI文本检测方案调研报告</h1>
+<p style="color:var(--dim)">调研时间：2026-09-05 | 调研范围：学术论文、开源项目、平台实践、社区共识</p>
+
+<div class="summary-box">
+<p><strong>核心结论</strong>：当前系统的 σ²/TTR/Pσ² 三个指标方向正确，实测能有效区分人写和AI；但 EGR 和 Cσ² 依赖硬编码词库，本质脆弱，应替换为不依赖词库的统计方法。最佳方案是分层架构：纯统计指标（无需模型）+ 轻量ML分类器（可选）+ 结构特征（需开发）。</p>
+</div>
+
+<h2>一、问题诊断：为什么词库方式会误标记</h2>
+
+<div class="card card-danger">
+<h3>根本缺陷：词库覆盖 vs 写作多样性的矛盾</h3>
+<p>EGR 的计算逻辑是 <code>笼统情感词数 / 感官词数</code>，靠两个固定词库做匹配。问题在于：</p>
+<ul>
+<li><strong>题材差异</strong>：《攻玉》是探案文，不写"胃紧""视野发白"；《太傅》是搞笑文，不用"CPU烧了"</li>
+<li><strong>补丁陷阱</strong>：每发现一个误报就补词，但换题材又误报——永远补不完</li>
+<li><strong>经典反例</strong>：老舍《林海》被某工具判为99.9% AI，朱自清《荷塘月色》超60%疑似AI——统计指标连经典文学都会误判</li>
+</ul>
+<p>这不是阈值调不调的问题，而是<strong>方法论本身不适合</strong>。词库匹配只能作为弱参考信号，不能做门禁判据。</p>
+</div>
+
+<h2>二、业界方案全景</h2>
+
+<h3>2.1 专业检测工具的技术架构</h3>
+<table>
+<tr><th>方案</th><th>原理</th><th>准确率</th><th>是否需要模型</th><th>中文适配</th></tr>
+<tr><td>困惑度+突发性 (GPTZero)</td><td>语言模型对文本的"意外程度" + 文本波动度</td><td>85-95%</td><td>是（需LM推理）</td><td>通用</td></tr>
+<tr><td>TF-IDF + LinearSVC (lyc8503)</td><td>字符级n-gram频率模式学习</td><td>~85%</td><td>是（107MB模型）</td><td><strong>专门针对中文网文训练</strong></td></tr>
+<tr><td>Qwen2.5-7B + LoRA</td><td>大模型微调二分类</td><td>95.9%</td><td>是（需GPU）</td><td>中文</td></tr>
+<tr><td>依存句法n-gram</td><td>句法结构模式，非表面词汇</td><td>中等</td><td>是（需句法分析）</td><td>中文</td></tr>
+<tr><td>纯统计指标（我们的方案）</td><td>句长方差/用词多样性/段落方差</td><td>~75%（4指标）</td><td>否</td><td>通用</td></tr>
+</table>
+
+<h3>2.2 平台实际做法（番茄/晋江/起点）</h3>
+<div class="card card-blue">
+<p><strong>关键发现</strong>：三大平台都不只看文本本身，而是<strong>结合创作过程</strong>做判断。</p>
+<ul>
+<li><strong>晋江</strong>：要求作者提交 AI 对话前的原稿 + AI对话记录 + 输出稿，还原创作过程，而非单纯给文本打分</li>
+<li><strong>番茄</strong>：对"情节套路化、叙事逻辑混乱、大篇幅AI生成"做治理，允许AI辅助但要求≥30%人工加工</li>
+<li><strong>起点</strong>：要求作者主动申报AI使用，核心剧情禁止依赖AI</li>
+</ul>
+<p>误判案例：作者"小风熊"将2017年写的小说（AI尚未诞生）丢进检测器，被判"90%疑似AI生成"。</p>
+</div>
+
+<h3>2.3 网文社区公认的人写 vs AI差异</h3>
+<table>
+<tr><th>维度</th><th>人写特征</th><th>AI特征</th><th>能否量化</th></tr>
+<tr><td>叙事推进</td><td>每段推进剧情，有跳跃性</td><td>字数多但原地踏步</td><td>需开发</td></tr>
+<tr><td>细节具体度</td><td>"村口老槐树树皮掉渣，蹭得胳膊满是红印"</td><td>"回忆十分快乐美好"</td><td>部分可量化</td></tr>
+<tr><td>逻辑一致性</td><td>有矛盾但合理</td><td>看似成立但细想不成立</td><td>难量化</td></tr>
+<tr><td>句式节奏</td><td>长短句交替明显</td><td>句子长度均匀</td><td><strong>已量化（σ²）</strong></td></tr>
+<tr><td>过渡词</td><td>直接跳转</td><td>"然而""因此"频繁</td><td>部分可量化</td></tr>
+<tr><td>表达套路</td><td>个人化语言</td><td>"AI八股"固定表达</td><td><strong>可量化（n-gram）</strong></td></tr>
+</table>
+
+<h2>三、六大候选方案技术深挖</h2>
+
+<h3>方案1：N-gram重复率 <span class="badge badge-ok">推荐·纯统计</span></h3>
+<div class="card card-ok">
+<p><strong>原理</strong>：统计文本中3-gram/4-gram的重复比例。AI文本倾向复用相同短语结构，人写更多样。</p>
+<p><strong>为什么比EGR好</strong>：不需要词库，纯统计，不受题材影响。AI的"然而不仅如此与此同时"会自然产生高重复率。</p>
+<p><strong>实现</strong>：</p>
+<pre><code>from collections import Counter
+
+def ngram_repetition(text, n=3):
+    chars = list(text.replace(' ', '').replace('\n', ''))
+    ngrams = [tuple(chars[i:i+n]) for i in range(len(chars)-n+1)]
+    counts = Counter(ngrams)
+    total = len(ngrams)
+    repeated = sum(1 for c in counts.values() if c > 1)
+    return repeated / total if total > 0 else 0</code></pre>
+<p><strong>参考阈值</strong>（需用我们的样本校准）：</p>
+<ul>
+<li>英文参考：AI 3-gram重复率显著高于人写</li>
+<li>中文网文：无公开基准，需用3篇人写+1篇AI样本自测</li>
+<li>建议测试 n=3 和 n=4 两个值</li>
+</ul>
+<p><strong>优势</strong>：零依赖、极快、不误判特定题材</p>
+<p><strong>局限</strong>：短文本不稳定；对经过润色的AI文本可能失效</p>
+</div>
+
+<h3>方案2：突发性 (Burstiness) <span class="badge badge-ok">推荐·纯统计</span></h3>
+<div class="card card-ok">
+<p><strong>原理</strong>：GPTZero的核心指标之一。衡量文本在整个文档中的波动程度。</p>
+<p><strong>多种实现方式</strong>：</p>
+<table>
+<tr><th>实现</th><th>公式</th><th>数据来源</th><th>难度</th></tr>
+<tr><td>句长变异系数 (CV)</td><td>std(句长) / mean(句长)</td><td>句子</td><td>已有（σ²的变体）</td></tr>
+<tr><td>Goh-Barabási参数B</td><td>(σ-μ) / (σ+μ)</td><td>句长分布</td><td>简单</td></tr>
+<tr><td>Fano因子</td><td>σ² / μ</td><td>任意粒度</td><td>简单</td></tr>
+<tr><td>Token级突发性</td><td>std(per_sentence_surprisal) / mean(...)</td><td>需LM</td><td>需模型</td></tr>
+</table>
+<p><strong>参考阈值</strong>（第三方检测器，需用我们样本校准）：</p>
+<table>
+<tr><th>文本类型</th><th>Burstiness (CV)</th></tr>
+<tr><td>AI生成 (ChatGPT/Claude)</td><td>0.15-0.30</td></tr>
+<tr><td>AI生成 (Gemini)</td><td>0.15-0.22</td></tr>
+<tr><td>人写（典型）</td><td>0.60-0.85</td></tr>
+<tr><td>人写（创意/口语化）</td><td>0.80-1.00+</td></tr>
+</table>
+<p><strong>与我们现有σ²的关系</strong>：σ²是标准差，Burstiness CV是标准差/均值。后者无量纲、可跨章节比较。建议同时保留两者。</p>
+</div>
+
+<h3>方案3：困惑度 (Perplexity) <span class="badge badge-warn">推荐·需轻量模型</span></h3>
+<div class="card card-warn">
+<p><strong>原理</strong>：语言模型对文本的"不意外程度"。AI生成的文本对模型来说更"熟悉"，困惑度低；人写更"意外"，困惑度高。</p>
+<p><strong>本地实现方案</strong>：</p>
+<ul>
+<li><strong>Qwen2.5-0.5B + CPU</strong>：最小的实用中文模型，可用transformers库CPU推理</li>
+<li><strong>KenLM</strong>：快速n-gram语言模型，需先训练，但推理极快</li>
+<li>不需要GPU，但CPU推理较慢（单章约10-30秒）</li>
+</ul>
+<p><strong>参考阈值</strong>：</p>
+<table>
+<tr><th>文本类型</th><th>Perplexity</th></tr>
+<tr><td>AI生成</td><td>20-60</td></tr>
+<tr><td>人写</td><td>80-200</td></tr>
+</table>
+<p><strong>优势</strong>：单一指标中区分力最强，捕捉语言模型层面的统计一致性</p>
+<p><strong>局限</strong>：需要模型文件（0.5B约1GB）；CPU推理慢；对短文本不稳定</p>
+</div>
+
+<h3>方案4：TF-IDF + LinearSVC轻量分类器 <span class="badge badge-warn">推荐·有现成项目</span></h3>
+<div class="card card-warn">
+<p><strong>原理</strong>：从8536篇中文网文（2022年前人写）+ 7个LLM生成的文本中学习字符级n-gram频率模式。</p>
+<p><strong>核心设计</strong>：</p>
+<pre><code>TfidfVectorizer(analyzer="char", ngram_range=(2, 4), min_df=2)
+# 字符级2-4 gram，不需要分词器
+# 7个LLM各训练一个二分类器，多数投票</code></pre>
+<p><strong>关键指标</strong>：</p>
+<table>
+<tr><th>模型</th><th>准确率</th><th>F1</th></tr>
+<tr><td>Doubao</td><td>89.4%</td><td>0.87</td></tr>
+<tr><td>Qwen</td><td>89.1%</td><td>0.90</td></tr>
+<tr><td>Gemini</td><td>88.1%</td><td>0.81</td></tr>
+<tr><td>Kimi K2.5</td><td>87.2%</td><td>0.85</td></tr>
+<tr><td>DeepSeek v3.2</td><td>85.3%</td><td>0.84</td></tr>
+<tr><td>GLM-5</td><td>84.9%</td><td>0.83</td></tr>
+<tr><td>GLM-4.7</td><td>84.4%</td><td>0.82</td></tr>
+</table>
+<p><strong>项目信息</strong>：</p>
+<ul>
+<li>GitHub: <code>lyc8503/AITextDetector</code></li>
+<li>License: Apache-2.0</li>
+<li>模型大小: ~107MB (浏览器JSON) / ~488MB (完整release)</li>
+<li>在线Demo: <code>lyc8503.github.io/AITextDetector</code></li>
+<li>最后更新: 2026-03</li>
+<li><strong>专门针对中文网文训练</strong>，最贴合我们的场景</li>
+</ul>
+<p><strong>优势</strong>：现成可用、专门针对网文、CPU可跑、Apache-2.0开源</p>
+<p><strong>局限</strong>：对未见过的LLM准确率可能下降；作者说Claude Opus 4.5较难检测</p>
+</div>
+
+<h3>方案5：火山引擎8维特征体系 <span class="badge badge-blue">参考·特征设计</span></h3>
+<div class="card card-blue">
+<p>火山引擎2026年文章描述了网文平台AI检测的8个统计特征维度：</p>
+<table>
+<tr><th>特征</th><th>说明</th><th>我们现状</th><th>实现难度</th></tr>
+<tr><td>lexical_diversity</td><td>去停用词后唯一词比</td><td>已有(TTR)</td><td>-</td></tr>
+<tr><td>sentence_length_variance</td><td>句长标准差</td><td>已有(σ²)</td><td>-</td></tr>
+<tr><td>repetition_ngram</td><td>3-gram重复率</td><td><strong>需新增</strong></td><td>低</td></tr>
+<tr><td>cliche_ratio</td><td>常见模板短语命中率</td><td>部分有(EGR词库)</td><td>中</td></tr>
+<tr><td>punctuation_rhythm</td><td>标点间隔变异系数</td><td><strong>需新增</strong></td><td>低</td></tr>
+<tr><td>dialogue_ratio</td><td>对话占比5%-65%</td><td><strong>需新增</strong></td><td>低</td></tr>
+<tr><td>sensory_emotion_density</td><td>感官/情感词密度</td><td>部分有(EGR)</td><td>中</td></tr>
+<tr><td>semantic_smoothness</td><td>相邻句嵌入相似度>0.92为AI</td><td>无</td><td>高(需嵌入模型)</td></tr>
+</table>
+<p>另有一个网文插件的实际阈值表（社区工程实践）：</p>
+<table>
+<tr><th>特征</th><th>人写区间</th><th>过渡</th><th>AI区间</th></tr>
+<tr><td>黑名单命中率</td><td>0-2/千字</td><td>3-4</td><td>≥5</td></tr>
+<tr><td>句子重复率</td><td>≤1组</td><td>2组</td><td>≥3组</td></tr>
+<tr><td>句长标准差</td><td>8-18字</td><td>6-8</td><td>&lt;6</td></tr>
+<tr><td>段落长度CV</td><td>0.4-1.2</td><td>0.3-0.4</td><td>&lt;0.3</td></tr>
+</table>
+<p><strong>注意</strong>：句长标准差人写8-18，与我们 σ²≥8 的阈值一致！段落长度CV 0.4-1.2也和我们的实测吻合。</p>
+</div>
+
+<h3>方案6：开源工具对比</h3>
+<table>
+<tr><th>项目</th><th>类型</th><th>CPU可用</th><th>网文适配</th><th>大小</th><th>License</th></tr>
+<tr><td>lyc8503/AITextDetector</td><td>TF-IDF+SVM</td><td>✅</td><td><strong>专门训练</strong></td><td>107MB</td><td>Apache-2.0</td></tr>
+<tr><td>zejunwang1/GPTDetector</td><td>GPT-2中文分类器</td><td>✅</td><td>通用</td><td>~500MB</td><td>Apache-2.0</td></tr>
+<tr><td>StartEnd/humanize-zh</td><td>规则+n-gram+困惑度</td><td>✅</td><td>通用中文</td><td>小</td><td>-</td></tr>
+<tr><td>YuchuanTian/AIGC_text_detector</td><td>多尺度PU检测</td><td>部分</td><td>学术</td><td>大</td><td>MIT</td></tr>
+</table>
+
+<h2>四、推荐方案：分层架构</h2>
+
+<div class="tier tier-1">
+<div class="tier-num">1</div>
+<div class="tier-content">
+<div class="tier-title">第一层：纯统计指标（零依赖，立即实现）</div>
+<p><strong>保留</strong>：σ²（句长方差）、TTR（用词多样性）、Pσ²（段落长度方差）</p>
+<p><strong>新增</strong>：</p>
+<ul>
+<li><strong>n-gram重复率</strong>（3-gram + 4-gram）— 替代EGR的核心指标，不依赖词库</li>
+<li><strong>Burstiness CV</strong>（句长变异系数 = std/mean）— σ²的无量纲版，可跨章节比较</li>
+<li><strong>段落长度CV</strong> — Pσ²的无量纲版，社区阈值0.4-1.2(人写)/&lt;0.3(AI)</li>
+<li><strong>对话占比</strong> — regex匹配引号内文本，阈值5%-65%为正常</li>
+<li><strong>标点节奏CV</strong> — 标点间距的变异系数</li>
+</p>
+<p><strong>降级为参考（不做硬门禁）</strong>：EGR、Cσ²</p>
+</div>
+</div>
+
+<div class="tier tier-2">
+<div class="tier-num">2</div>
+<div class="tier-content">
+<div class="title">第二层：轻量ML分类器（可选，推荐集成）</div>
+<p><strong>集成 lyc8503/AITextDetector</strong>：</p>
+<ul>
+<li>107MB模型，CPU推理，专门针对中文网文训练</li>
+<li>85%准确率，7个LLM二分类器多数投票</li>
+<li>Apache-2.0开源，可直接集成或参考实现</li>
+<li>作为第二道防线，与第一层指标交叉验证</li>
+</ul>
+<p>或者：用我们的4个样本+更多数据训练自己的TF-IDF+SVM分类器</p>
+</div>
+</div>
+
+<div class="tier tier-3">
+<div class="tier-num">3</div>
+<div class="tier-content">
+<div class="tier-title">第三层：困惑度（可选，需模型）</div>
+<p><strong>Qwen2.5-0.5B CPU推理</strong>：</p>
+<ul>
+<li>单一指标中区分力最强</li>
+<li>但需要~1GB模型文件，CPU推理10-30秒/章</li>
+<li>适合做最终判定，不适合实时检测</li>
+</ul>
+<p>或者使用 KenLM 训练n-gram语言模型，推理更快</p>
+</div>
+</div>
+
+<h2>五、改造后的G5门禁建议</h2>
+
+<table>
+<tr><th>指标</th><th>角色</th><th>门限</th><th>说明</th></tr>
+<tr><td>σ²（句长方差）</td><td><strong>硬门禁</strong></td><td>≥8</td><td>保留，实测有效</td></tr>
+<tr><td>TTR（用词多样性）</td><td><strong>硬门禁</strong></td><td>≥0.40</td><td>保留，实测有效</td></tr>
+<tr><td>Pσ²（段落长度方差）</td><td><strong>硬门禁</strong></td><td>≥20</td><td>保留，实测有效</td></tr>
+<tr><td>n-gram重复率</td><td><strong>硬门禁（新）</strong></td><td>需校准</td><td>替代EGR，不依赖词库</td></tr>
+<tr><td>Burstiness CV</td><td><strong>硬门禁（新）</strong></td><td>≥0.4</td><td>社区参考值</td></tr>
+<tr><td>段落长度CV</td><td>参考</td><td>≥0.3</td><td>Pσ²的补充</td></tr>
+<tr><td>对话占比</td><td>参考</td><td>5%-65%</td><td>异常值预警</td></tr>
+<tr><td>标点节奏CV</td><td>参考</td><td>需校准</td><td>补充信号</td></tr>
+<tr><td>EGR</td><td><strong>降级为参考</strong></td><td>-</td><td>不再做硬门禁</td></tr>
+<tr><td>Cσ²</td><td><strong>降级为参考</strong></td><td>-</td><td>不再做硬门禁</td></tr>
+<tr><td>ML分类器（可选）</td><td>第二道防线</td><td>概率>0.5</td><td>集成lyc8503或自训练</td></tr>
+</table>
+
+<h2>六、下一步行动建议</h2>
+
+<div class="card card-ok">
+<ol>
+<li><strong>立即做</strong>：用4个样本测试 n-gram重复率 和 Burstiness CV，看区分力是否足够替代EGR</li>
+<li><strong>短期做</strong>：实现对话占比、标点节奏CV等纯统计指标，丰富指标体系</li>
+<li><strong>中期做</strong>：评估是否集成 lyc8503/AITextDetector 作为第二层分类器</li>
+<li><strong>长期做（可选）</strong>：引入 Qwen2.5-0.5B 困惑度作为第三层终极判据</li>
+<li><strong>文档同步</strong>：更新 ORCHESTRATOR.md 和 metrics.py，将EGR/Cσ²从硬门禁降级</li>
+</ol>
+</div>
+
+<p style="color:var(--dim); margin-top:30px; font-size:0.9em;">调研来源：GPTZero、C-ReD、火山引擎、晋江文学城公告、经济观察报、NGA论坛、CSDN、博客园、arXiv论文、GitHub开源项目等</p>
+
+</body>
+</html>

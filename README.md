@@ -111,13 +111,12 @@ flowchart LR
 
 ## 快速开始
 
+> 完整分步安装教程（Windows · TRAE，含国内镜像、技能导入、首次运行）见 [安装教程](docs/install.md)。
 
 ### 环境要求
 
 - 任意支持 Skill 的 AI Agent（TRAE、Claude Code 等）
-- 指定下载包， 给agent下命令：“安装skill”
 - Python 3.10+（运行 `tools/` 下 3 个脚本）
-- 飞书同步为可选功能，未配置不阻塞创作
 
 ### 安装
 
@@ -127,6 +126,7 @@ flowchart LR
 2. TRAE：**设置 → 技能与命令 → 创建 → 全局**，直接上传该 zip，确认后即在技能面板出现 `novelOps`。
 3. 或把解压目录复制到技能目录：`%userprofile%\.trae-cn\skills\novelOps`。
 
+完整分步教程见 [安装教程](docs/install.md)。
 
 新建小说项目目录，把 `novel-system/` 模板复制进去（若 `dynamic/` 为空，首次运行时 Agent 会自动从模板初始化）。
 
@@ -149,7 +149,6 @@ python tools/metrics.py chapters/ch048_draft.md                          # 量�
 python tools/metrics.py chapters/ch048_draft.md --fingerprint dynamic/fingerprint.json
 python tools/metrics.py ch041_final.md ... ch050_final.md --perturb     # 同质化检测
 python tools/metrics.py ch041_final.md ... ch050_final.md --stability   # 文风稳定性
-python tools/feishu_sync.py --init --name "书名 小说项目"                 # 飞书同步（可选）
 ```
 
 ## 项目结构
@@ -159,7 +158,7 @@ novel-ops/
 ├── SKILL.md                 # 调度协议（本 skill 的全部逻辑）
 ├── novel-system/            # 小说项目模板
 │   ├── ORCHESTRATOR.md      # 主编调度指令
-│   ├── tools/               # metrics.py / chapter-word-counter.py / feishu_sync.py
+│   ├── tools/               # metrics.py / chapter-word-counter.py / report-gen.py
 │   ├── static/              # 静态轨：大纲、人物、节奏、核心创意卡 + prompts/（10 个角色提示词）
 │   ├── dynamic/templates/   # 15 个动态轨模板
 │   ├── chapters/            # 逐章草稿与终稿（运行时生成）
@@ -189,7 +188,7 @@ novelforge 是优秀的「人写、AI 辅助」IDE，novel-forge 展示了「一
 2. **门禁必过**：G1–G7 全部通过才进入下一章
 3. **用户只审 G8**：4 个人工决策点之外全自动
 4. **状态落盘优先**：G7 的 12 项 WRITE-CHECK 完成才算一章结束，会话断开可恢复
-5. **故障不阻塞**：飞书同步失败、子 Agent 失败均走降级路径
+5. **故障不阻塞**：子 Agent 失败走降级路径，不中断创作
 6. **核心创意卡是北极星**：5 项核心设定全流程锁定，AI 无权修改
 
 ## 常见问题
@@ -202,9 +201,6 @@ novelforge 是优秀的「人写、AI 辅助」IDE，novel-forge 展示了「一
 
 **可以中途改核心设定吗？**
 可以，由你改——核心创意卡是 Markdown 文件。AI 在全流程中无权修改这 5 项设定。
-
-**飞书同步必须配置吗？**
-可选。不配置或同步失败均不阻塞创作，仅少一个协作入口。
 
 **导出格式支持哪些？**
 当前按番茄小说格式导出到 `publish/fanqie/`，多平台导出在 Roadmap 中。

@@ -1,9 +1,9 @@
 ﻿---
-name: "novelOps"
-description: "NovelOps（小说连载流水线执行器）。自包含地执行 ORCHESTRATOR.md 定义的完整写作流程：启动新书（全局规划）或逐章推进 THINK→DRAFT→VERIFY→REVISE 循环，含 8 级门禁控制、3 个量化工具调用和 15 个动态轨状态管理。当用户说「启动新书」「写下一章」「继续写作」「推进章节」或任何涉及章节循环写作的意图时使用。"
+name: "novelOps-v2"
+description: "NovelOps v2（小说连载流水线执行器）。自包含地执行 ORCHESTRATOR.md 定义的完整写作流程：启动新书（全局规划）或逐章推进 THINK→DRAFT→VERIFY→REVISE 循环，含 8 级门禁控制+G6.5质检报告、3 个量化工具调用和 18 个动态轨状态管理，集成语料库自动加载、Scene-Sequel场景规划、R1-R5写作铁律、Humanizer 3-Pass去AI化、质检模式选择（QC_FULL/CHECK/SKIP）。当用户说「启动新书」「写下一章」「继续写作」「推进章节」「仿写」「续写」或任何涉及章节循环写作的意图时使用。"
 ---
 
-# NovelOps · 小说连载流水线执行器
+# NovelOps v2 · 小说连载流水线执行器
 
 你是小说写作系统的主编调度器。你的唯一职责是**自包含地执行** `ORCHESTRATOR.md` 中定义的完整写作流程，不需要用户逐条下达指令。
 
@@ -21,9 +21,11 @@ novel-system/
 ├── tools/                   # 3 个工具脚本
 │   ├── metrics.py
 │   ├── chapter-word-counter.py
-│   └── feishu_sync.py
+│   └── report-gen.py
+├── knowledge/               # 7 个语料库文件（自动加载）
+├── prompts/                 # 5 个 Prompt 模板（自动加载）
 ├── static/prompts/          # 10 个角色提示词
-└── dynamic/templates/       # 15 个动态轨模板 + 1 个同步状态文件
+└── dynamic/templates/       # 18 个动态轨模板
 ```
 
 如果 `dynamic/` 目录为空，先复制模板：
@@ -100,14 +102,6 @@ novel-system/
 
 **否决** → 打回对应 Agent 重做
 
-### 飞书同步初始化（门禁 1 通过后）
-
-```
-python tools/feishu_sync.py --init --name "[书名] 小说项目"
-```
-
-同步失败不阻塞创作流程。
-
 ### 阶段 1：前 3 章特殊流程
 
 每章执行简化版循环（重点打磨开篇质量）：
@@ -133,7 +127,7 @@ python tools/feishu_sync.py --init --name "[书名] 小说项目"
 ### 启动检查
 
 1. 读 `dynamic/progress.md` 确认当前章号 N
-2. 确认 `dynamic/` 下 15 个动态轨文件完好
+2. 确认 `dynamic/` 下 18 个动态轨文件完好
 3. 读 `dynamic/gate-log.md` 确认上一章 G1-G7 全部通过
 
 ### 每章执行流程
@@ -144,7 +138,7 @@ python tools/feishu_sync.py --init --name "[书名] 小说项目"
 
 #### G1 状态加载门（THINK 开始）
 
-**通过条件**：15 个动态轨文件全部读取。不通过 → 中止，补全缺失文件。
+**通过条件**：18 个动态轨文件全部读取。不通过 → 中止，补全缺失文件。
 
 按顺序读取并组装章节卡：
 
@@ -206,12 +200,6 @@ python tools/metrics.py chapters/chN_draft.md --fingerprint dynamic/fingerprint.
 
 更新 `dynamic/compliance-log.md` 和 `dynamic/gate-log.md`。
 
-#### 飞书同步（G4 通过后）
-
-```
-python tools/feishu_sync.py --sync --trigger g4
-```
-
 #### REVISE 阶段
 
 根据 QA 报告处置建议：
@@ -219,10 +207,7 @@ python tools/feishu_sync.py --sync --trigger g4
 | 打回次数 | 处置 |
 |----------|------|
 | 通过（轻微问题） | 主编局部修改 → `chapters/chN_final.md` |
-| 第 1 次 | REVISE 局部修改 |
-| 第 2 次 | DRAFT 全章重写 |
-| 第 3 次 | 触发创意扰动 Agent（提示词 `static/prompts/creative-disruption.md`） |
-| 第 4 次 | 升级人审 |
+| 第 1 次 | REVISE 局部修改 → 仍不通过则暂停等用户决策 |
 
 #### G7 状态落盘门（章末收尾）
 
@@ -241,7 +226,6 @@ python tools/feishu_sync.py --sync --trigger g4
 | 9 | 更新副线状态（出场章号/当前阶段/待回收线索/预警） | `dynamic/subplot-tracker.md` |
 | 10 | 章号 +1 | `dynamic/progress.md` |
 | 11 | 记录 G7 通过 | `dynamic/gate-log.md` |
-| 12 | 飞书同步 | `python tools/feishu_sync.py --sync --chapter N --trigger g7` |
 
 #### 10 章阶段质检（每 10 章触发一次）
 
@@ -302,7 +286,6 @@ python tools/feishu_sync.py --sync --trigger g4
 **通过** → 执行多平台导出：
 - 三级敏感词检测
 - 按番茄小说格式导出到 `publish/fanqie/`
-- 飞书全量同步：`python tools/feishu_sync.py --sync --force --trigger gate4`
 
 ---
 
@@ -313,7 +296,7 @@ python tools/feishu_sync.py --sync --trigger g4
 1. 读 `dynamic/progress.md` 确定断点
 2. 读 `dynamic/gate-log.md` 确定断点处门禁状态
 3. 读静态轨恢复设定
-4. 读 15 个动态轨恢复状态
+4. 读 18 个动态轨恢复状态
 5. 从断点处未通过的门禁继续
 
 ### 子 Agent 调用失败
@@ -325,10 +308,10 @@ python tools/feishu_sync.py --sync --trigger g4
 ### 每章启动时的自检清单
 
 - [ ] `dynamic/progress.md` 可读
-- [ ] 15 个动态轨文件存在
+- [ ] 18 个动态轨文件存在
 - [ ] `dynamic/gate-log.md` 上一章 G1-G7 全部通过
 - [ ] `static/core_creative_card.md` 可读
-- [ ] 3 个工具脚本 (`tools/metrics.py`, `tools/chapter-word-counter.py`, `tools/feishu_sync.py`) 存在
+- [ ] 3 个工具脚本 (`tools/metrics.py`, `tools/chapter-word-counter.py`, `tools/report-gen.py`) 存在
 
 ---
 
@@ -338,5 +321,5 @@ python tools/feishu_sync.py --sync --trigger g4
 2. **门禁必过**：G1-G7 全部通过后才进入下一章，G8 仅 4 个人工确认点需要用户介入
 3. **用户只审 G8**：G1-G7 自动执行，仅在 G8（门禁 1/2/3/4）时暂停等待用户确认
 4. **状态落盘优先**：G7 的 12 项 WRITE-CHECK 全部完成才算一章结束，确保会话断开后可恢复
-5. **故障不阻塞**：飞书同步失败、子 Agent 调用失败均不中断创作流程，走降级路径
+5. **故障不阻塞**：子 Agent 调用失败不中断创作流程，走降级路径
 6. **核心创意卡不可偏离**：全流程以 `static/core_creative_card.md` 为北极星，AI 无权修改 5 项核心设定

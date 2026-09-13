@@ -4,7 +4,7 @@
 章节字数统计工具
 
 统计章节文件的中文字符数（排除标点、空白），并判断是否达到番茄小说平台标准。
-质量标准：单章 2600-3300 字（中文字符，不含标点和空白）。
+质量标准：单章 1200-1500 字（中文字符，不含标点和空白）。
 
 用法示例:
     # 单章统计
@@ -38,8 +38,8 @@ from datetime import datetime
 # ============ Constants ============
 
 # Default word count thresholds (Fanqie platform standard)
-DEFAULT_MIN_WORDS = 2600
-DEFAULT_MAX_WORDS = 3300
+DEFAULT_MIN_WORDS = 1200
+DEFAULT_MAX_WORDS = 1500
 
 # Chinese character Unicode ranges:
 #   CJK Unified Ideographs:          U+4E00 - U+9FFF
@@ -417,7 +417,7 @@ def main():
   %(prog)s chapters/ch001.md --json             # JSON 输出
   %(prog)s chapters/ch001.md --min 1000 --max 2000  # 自定义范围
 
-质量标准: 单章 2600-3300 字 (中文字符, 不含标点和空白)
+质量标准: 单章 1200-1500 字 (中文字符, 不含标点和空白)
         """,
     )
 

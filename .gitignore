@@ -9,3 +9,9 @@ Thumbs.db
 # Editors
 .vscode/
 .idea/
+
+# Tool internal
+.trae-html-share-packages/
+
+# Oversized model file (exceeds GitHub 100 MiB limit)
+novel-system/tools/aitext_detector/models.json

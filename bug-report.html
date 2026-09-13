@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NovelOps Skill Bug 检测报告</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    line-height: 1.7;
+    padding: 24px;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    color: #58a6ff;
+    border-bottom: 2px solid #30363d;
+    padding-bottom: 12px;
+    margin-bottom: 8px;
+  }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 32px; }
+  .summary-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+  .summary-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 24px;
+    text-align: center;
+    min-width: 120px;
+  }
+  .summary-card .num { font-size: 28px; font-weight: 700; }
+  .summary-card .label { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  .critical .num { color: #f85149; }
+  .high .num { color: #d29922; }
+  .medium .num { color: #58a6ff; }
+  .low .num { color: #3fb950; }
+  .total .num { color: #c9d1d9; }
+
+  .bug {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-left: 4px solid;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .bug.critical { border-left-color: #f85149; }
+  .bug.high { border-left-color: #d29922; }
+  .bug.medium { border-left-color: #58a6ff; }
+  .bug.low { border-left-color: #3fb950; }
+
+  .bug-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .bug-id {
+    font-size: 13px;
+    color: #8b949e;
+    font-family: "SF Mono", "Cascadia Code", monospace;
+  }
+  .bug-title { font-size: 18px; font-weight: 600; color: #e6edf3; }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge.critical { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
+  .badge.high { background: rgba(210,153,34,0.15); color: #d29922; border: 1px solid rgba(210,153,34,0.3); }
+  .badge.medium { background: rgba(88,166,255,0.15); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); }
+  .badge.low { background: rgba(63,185,79,0.15); color: #3fb950; border: 1px solid rgba(63,185,79,0.3); }
+
+  .bug-body { margin-left: 0; }
+  .bug-body p { margin-bottom: 8px; color: #adbac7; }
+  .bug-body .field { margin-bottom: 10px; }
+  .bug-body .field-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #8b949e;
+    margin-bottom: 4px;
+  }
+  .bug-body .field-value { font-size: 14px; color: #adbac7; }
+
+  pre {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    margin: 8px 0;
+    color: #adbac7;
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    line-height: 1.5;
+  }
+  code {
+    background: rgba(110,118,129,0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    color: #e6edf3;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    background: #21262d;
+    color: #8b949e;
+    font-weight: 600;
+    border-bottom: 1px solid #30363d;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #30363d;
+    color: #adbac7;
+  }
+  .fix-box {
+    background: rgba(63,185,79,0.08);
+    border: 1px solid rgba(63,185,79,0.2);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-top: 10px;
+  }
+  .fix-box .fix-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #3fb950;
+    margin-bottom: 6px;
+  }
+  .section-title {
+    font-size: 20px;
+    color: #58a6ff;
+    margin: 32px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #30363d;
+  }
+  .toc {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin-bottom: 32px;
+  }
+  .toc a { color: #58a6ff; text-decoration: none; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin-bottom: 4px; }
+  .toc .toc-bug-id { color: #8b949e; font-family: monospace; font-size: 12px; margin-right: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>NovelOps Skill Bug 检测报告</h1>
+<div class="subtitle">检测日期：2026-09-05 &nbsp;|&nbsp; 检测范围：SKILL.md、ORCHESTRATOR.md、3 个 Python 工具、15 个动态轨模板 &nbsp;|&nbsp; 共发现 15 个 Bug</div>
+
+<div class="summary-bar">
+  <div class="summary-card critical"><div class="num">4</div><div class="label">致命 (Critical)</div></div>
+  <div class="summary-card high"><div class="num">6</div><div class="label">严重 (High)</div></div>
+  <div class="summary-card medium"><div class="num">3</div><div class="label">中等 (Medium)</div></div>
+  <div class="summary-card low"><div class="num">2</div><div class="label">轻微 (Low)</div></div>
+  <div class="summary-card total"><div class="num">15</div><div class="label">合计</div></div>
+</div>
+
+<div class="toc">
+  <strong style="color:#8b949e;">目录</strong>
+  <ul style="list-style:none; padding-left:0; margin-top:8px;">
+    <li><span class="toc-bug-id">#01</span><a href="#bug01">[致命] metrics.py 指标阈值与 ORCHESTRATOR.md/SKILL.md 完全不一致</a></li>
+    <li><span class="toc-bug-id">#02</span><a href="#bug02">[致命] chapter-word-counter.py 字数标准 (2600-3300) 与文档要求 (1200-1500) 矛盾</a></li>
+    <li><span class="toc-bug-id">#03</span><a href="#bug03">[致命] G7 状态落盘门的 12 项 WRITE-CHECK 清单在两份文档中内容完全不同</a></li>
+    <li><span class="toc-bug-id">#04</span><a href="#bug04">[致命] 00_INDEX.md 门禁定义 (G1-G7) 与 ORCHESTRATOR.md 完全冲突</a></li>
+    <li><span class="toc-bug-id">#05</span><a href="#bug05">[严重] 文件路径不一致：sample_library.json vs sample-library.md</a></li>
+    <li><span class="toc-bug-id">#06</span><a href="#bug06">[严重] rhythm_tracker.json 被引用但不存在于项目中</a></li>
+    <li><span class="toc-bug-id">#07</span><a href="#bug07">[严重] G1 状态加载门文件清单在 SKILL.md 和 ORCHESTRATOR.md 之间不匹配</a></li>
+    <li><span class="toc-bug-id">#08</span><a href="#bug08">[严重] 门禁编号体系不一致：SKILL.md 用"门禁1-4"，ORCHESTRATOR.md 用 G0/G8</a></li>
+    <li><span class="toc-bug-id">#09</span><a href="#bug09">[严重] 00_INDEX.md 核心创意卡字段与 ORCHESTRATOR.md/SKILL.md 不匹配</a></li>
+    <li><span class="toc-bug-id">#10</span><a href="#bug10">[严重] 00_INDEX.md 静态文件名与实际文件名不匹配</a></li>
+    <li><span class="toc-bug-id">#11</span><a href="#bug11">[严重] 00_INDEX.md 追踪表索引的读写时机与门禁定义矛盾</a></li>
+    <li><span class="toc-bug-id">#12</span><a href="#bug12">[中等] feishu_sync.py --init 不支持 --name 参数</a></li>
+    <li><span class="toc-bug-id">#13</span><a href="#bug13">[中等] feishu_sync.py --force 模式使用 trigger="force" 不在合法值集合中</a></li>
+    <li><span class="toc-bug-id">#14</span><a href="#bug14">[中等] SKILL.md 声称 15 个动态轨文件但 G1 清单仅列 14 个文件</a></li>
+    <li><span class="toc-bug-id">#15</span><a href="#bug15">[轻微] metrics.py VAGUE_EMOTION_WORDS 存在重复词条</a></li>
+  </ul>
+</div>
+
+<!-- ===== BUG 01 ===== -->
+<div class="bug critical" id="bug01">
+  <div class="bug-header">
+    <span class="bug-id">#01</span>
+    <span class="bug-title">metrics.py 指标阈值与 ORCHESTRATOR.md/SKILL.md 完全不一致</span>
+    <span class="badge critical">Critical</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>tools/metrics.py</code> 第 18-23 行（文档注释）及第 286-295 行（THRESHOLDS 字典）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>Python 工具中定义的指标门限与 ORCHESTRATOR.md/SKILL.md 中规定的门限<strong>差了 4-5 倍</strong>，导致工具会放行本应不达标的章节，同时纠正建议中的阈值也是错误的。</p>
+    </div>
+    <table>
+      <tr><th>指标</th><th>metrics.py 代码值</th><th>ORCHESTRATOR.md / SKILL.md 文档值</th><th>偏差倍数</th></tr>
+      <tr><td>σ²（句长方差）</td><td>≥ 25</td><td>≥ 120</td><td>4.8x</td></tr>
+      <tr><td>TTR（用词多样性）</td><td>≥ 0.25</td><td>≥ 0.48</td><td>1.9x</td></tr>
+      <tr><td>EGR（情感颗粒度比）</td><td>≤ 0.60</td><td>≤ 2.0</td><td>3.3x</td></tr>
+      <tr><td>Pσ²（段落长度方差）</td><td>≥ 80</td><td>≥ 300</td><td>3.75x</td></tr>
+    </table>
+    <pre># metrics.py 实际代码 (第 286-295 行)
+THRESHOLDS = {
+    "sigma2":  {"min": 25,   ...},   # 文档要求 ≥120
+    "ttr":     {"min": 0.25, ...},   # 文档要求 ≥0.48
+    "egr":     {"max": 0.60, ...},   # 文档要求 ≤2.0
+    "psigma2": {"min": 80,   ...},   # 文档要求 ≥300
+}</pre>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>将 <code>metrics.py</code> 中 THRESHOLDS 字典和 CORRECTIONS 字典的阈值统一改为 ORCHESTRATOR.md 中定义的值：σ²≥120, TTR≥0.48, EGR≤2.0, Pσ²≥300。同步更新文件头部的文档注释。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 02 ===== -->
+<div class="bug critical" id="bug02">
+  <div class="bug-header">
+    <span class="bug-id">#02</span>
+    <span class="bug-title">chapter-word-counter.py 字数标准 (2600-3300) 与文档要求 (1200-1500) 矛盾</span>
+    <span class="badge critical">Critical</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>tools/chapter-word-counter.py</code> 第 41-42 行：<code>DEFAULT_MIN_WORDS = 2600</code>, <code>DEFAULT_MAX_WORDS = 3300</code></div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>ORCHESTRATOR.md 和 SKILL.md 全文反复强调单章字数标准为 <strong>1200-1500 字</strong>（见 ORCHESTRATOR.md 第 477、512、703 行，SKILL.md 第 196 行），但字数统计工具的默认阈值设为 2600-3300，是文档要求的<strong>两倍以上</strong>。</p>
+      <p>后果：每一篇符合 1200-1500 字标准的正确章节都会被工具判定为"字数不足"，导致 G4/G7 门禁永远无法通过。</p>
+    </div>
+    <pre># chapter-word-counter.py 第 41-42 行
+DEFAULT_MIN_WORDS = 2600   # 应为 1200
+DEFAULT_MAX_WORDS = 3300   # 应为 1500</pre>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>将 <code>DEFAULT_MIN_WORDS</code> 改为 <code>1200</code>，<code>DEFAULT_MAX_WORDS</code> 改为 <code>1500</code>。同步更新 epilog 帮助文本中的字数说明。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 03 ===== -->
+<div class="bug critical" id="bug03">
+  <div class="bug-header">
+    <span class="bug-id">#03</span>
+    <span class="bug-title">G7 状态落盘门的 12 项 WRITE-CHECK 清单在两份文档中内容完全不同</span>
+    <span class="badge critical">Critical</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>SKILL.md</code> 第 229-244 行 vs <code>ORCHESTRATOR.md</code> 第 615-629 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>两份文档都声称 G7 有"12 项 WRITE-CHECK"，但清单内容<strong>完全不同</strong>：</p>
+      <ul style="padding-left:20px; margin:8px 0;">
+        <li><strong>SKILL.md 版本</strong>：列出的是<strong>操作步骤</strong>（写入终稿、压缩摘要、更新伏笔、更新角色状态…飞书同步）</li>
+        <li><strong>ORCHESTRATOR.md 版本</strong>：列出的是<strong>验证检查</strong>（验证 σ²≥120、验证 TTR≥0.48、验证 EGR≤2.0、验证 Pσ²≥300…）</li>
+      </ul>
+      <p>遵循 SKILL.md 的执行者会执行操作但跳过指标验证；遵循 ORCHESTRATOR.md 的执行者会验证指标但遗漏 6 个动态轨文件的更新。</p>
+    </div>
+    <table>
+      <tr><th>序号</th><th>SKILL.md 版本</th><th>ORCHESTRATOR.md 版本</th></tr>
+      <tr><td>1</td><td>质检通过 → 写入终稿</td><td>终稿文件已写入</td></tr>
+      <tr><td>2</td><td>压缩 200 字摘要</td><td>字数在 1200-1500 范围</td></tr>
+      <tr><td>3</td><td>更新伏笔</td><td>σ²≥120</td></tr>
+      <tr><td>4</td><td>更新角色状态</td><td>TTR≥0.48</td></tr>
+      <tr><td>5</td><td>更新已确立事实</td><td>EGR≤2.0</td></tr>
+      <tr><td>6</td><td>更新套路使用</td><td>Pσ²≥300</td></tr>
+      <tr><td>7</td><td>更新钩子状态</td><td>FP≥2（如有指纹库）</td></tr>
+      <tr><td>8</td><td>更新情感状态</td><td>progress.md 已更新章号</td></tr>
+      <tr><td>9</td><td>更新副线状态</td><td>character-state.md 已更新</td></tr>
+      <tr><td>10</td><td>章号 +1</td><td>foreshadowing.md 已更新</td></tr>
+      <tr><td>11</td><td>记录 G7 通过</td><td>next-hook.md + used-tropes.md 已更新</td></tr>
+      <tr><td>12</td><td>飞书同步</td><td>gate-log.md 已追加记录</td></tr>
+    </table>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>合并两份清单为一个统一的 24 项检查表（12 项验证 + 12 项操作），或在 SKILL.md 中明确引用 ORCHESTRATOR.md 的 G7 清单作为唯一标准。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 04 ===== -->
+<div class="bug critical" id="bug04">
+  <div class="bug-header">
+    <span class="bug-id">#04</span>
+    <span class="bug-title">00_INDEX.md 门禁定义 (G1-G7) 与 ORCHESTRATOR.md 完全冲突</span>
+    <span class="badge critical">Critical</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>dynamic/templates/00_INDEX.md</code> 第 80-88 行（门禁索引表）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>00_INDEX.md 模板中的门禁索引表给 G1-G7 赋予了与 ORCHESTRATOR.md <strong>完全不同</strong>的含义。执行者读取 00_INDEX.md 恢复状态时会得到错误的门禁定义。</p>
+    </div>
+    <table>
+      <tr><th>门禁</th><th>00_INDEX.md 定义</th><th>ORCHESTRATOR.md 定义</th><th>是否一致</th></tr>
+      <tr><td>G1</td><td>写前加载（连续性检查）</td><td>状态加载门（读取15个动态轨）</td><td>部分一致</td></tr>
+      <tr><td>G2</td><td>写后合规（字数/爽点/爆点/AI比例）</td><td>模仿学习门（提取样本特征卡）</td><td style="color:#f85149;">完全不同</td></tr>
+      <tr><td>G3</td><td>风险预警（伏笔超期/套路冷却）</td><td>写作门（草稿生成+禁词扫描）</td><td style="color:#f85149;">完全不同</td></tr>
+      <tr><td>G4</td><td>语言指纹（σ²/TTR/EGR/Pσ²）</td><td>平台规则门（字数/节奏/合规）</td><td style="color:#f85149;">完全不同</td></tr>
+      <tr><td>G5</td><td>情感弧线（情感连续性）</td><td>metrics 指标门（σ²/TTR/EGR/Pσ²）</td><td style="color:#f85149;">完全不同</td></tr>
+      <tr><td>G6</td><td>副线健康（副线出场频率）</td><td>动态轨一致性门（人物/伏笔/时间线）</td><td style="color:#f85149;">完全不同</td></tr>
+      <tr><td>G7</td><td>章末检查（钩子部署/节奏控制）</td><td>状态落盘门（12项WRITE-CHECK）</td><td style="color:#f85149;">完全不同</td></tr>
+    </table>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>重写 00_INDEX.md 的门禁索引表，使其与 ORCHESTRATOR.md 第 38-52 行的门禁总览完全一致。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 05 ===== -->
+<div class="bug high" id="bug05">
+  <div class="bug-header">
+    <span class="bug-id">#05</span>
+    <span class="bug-title">文件路径不一致：sample_library.json vs sample-library.md</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>ORCHESTRATOR.md</code> 第 439 行 vs <code>SKILL.md</code> 第 172 行 vs <code>00_INDEX.md</code> 第 55 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>模仿样本库的文件路径在三处文档中不一致：</p>
+      <ul style="padding-left:20px; margin:8px 0;">
+        <li>ORCHESTRATOR.md G2（第 439 行）：<code>dynamic/sample_library.json</code>（下划线 + .json）</li>
+        <li>SKILL.md G2（第 172 行）：<code>dynamic/sample-library.md</code>（连字符 + .md）</li>
+        <li>00_INDEX.md（第 55 行）：<code>sample-library.md</code>（连字符 + .md）</li>
+        <li>实际模板文件：<code>dynamic/templates/sample-library.md</code>（连字符 + .md）</li>
+      </ul>
+      <p>ORCHESTRATOR.md 引用了一个不存在的 <code>.json</code> 文件，执行 G2 时会找不到样本库。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>统一使用 <code>dynamic/sample-library.md</code>（与实际模板文件一致），修正 ORCHESTRATOR.md 中的引用。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 06 ===== -->
+<div class="bug high" id="bug06">
+  <div class="bug-header">
+    <span class="bug-id">#06</span>
+    <span class="bug-title">rhythm_tracker.json 被引用但不存在于项目中</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>ORCHESTRATOR.md</code> 第 473 行（G3 写作门）、第 514-516 行（G4 平台规则门）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>ORCHESTRATOR.md 在 G3 和 G4 中多次引用 <code>rhythm_tracker.json</code> 来检查节奏规则（3章一小爽、10章一大爆、憋屈不超2章），但该文件<strong>在整个项目中不存在</strong>：</p>
+      <ul style="padding-left:20px; margin:8px 0;">
+        <li>不在 <code>dynamic/templates/</code> 模板目录中</li>
+        <li>不在 <code>dynamic/</code> 运行目录中</li>
+        <li>不在 ORCHESTRATOR.md 的文件目录结构图中（第 826-862 行）</li>
+        <li>不在 15 个动态轨清单中</li>
+      </ul>
+      <p>这些节奏检查实际上无法执行。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>创建 <code>dynamic/templates/rhythm_tracker.json</code> 模板文件，或将节奏追踪功能合并到 <code>emotion-beat.md</code> 或 <code>progress.md</code> 中，并修正引用。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 07 ===== -->
+<div class="bug high" id="bug07">
+  <div class="bug-header">
+    <span class="bug-id">#07</span>
+    <span class="bug-title">G1 状态加载门文件清单在 SKILL.md 和 ORCHESTRATOR.md 之间不匹配</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>SKILL.md</code> 第 151-167 行 vs <code>ORCHESTRATOR.md</code> 第 398-414 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>两份文档对 G1 需要读取的文件清单存在显著差异：</p>
+      <ul style="padding-left:20px; margin:8px 0;">
+        <li><strong>SKILL.md 独有</strong>：<code>static/core_creative_card.md</code>（第 14 项）</li>
+        <li><strong>ORCHESTRATOR.md 独有</strong>（SKILL.md 遗漏）：<code>dynamic/compliance-log.md</code>、<code>dynamic/gate-log.md</code>、<code>dynamic/00_INDEX.md</code>、<code>dynamic/sample-library.md</code>、<code>dynamic/fingerprint.json</code></li>
+        <li>SKILL.md 第 15 项是"组装章节卡"（操作），不是文件读取</li>
+      </ul>
+      <p>遵循 SKILL.md 会遗漏 5 个关键动态轨文件的加载，导致状态恢复不完整。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>统一 G1 文件清单为 ORCHESTRATOR.md 的 15 个文件，将 <code>static/core_creative_card.md</code> 的读取移入 G1 或在 SKILL.md 中补充遗漏的 5 个文件。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 08 ===== -->
+<div class="bug high" id="bug08">
+  <div class="bug-header">
+    <span class="bug-id">#08</span>
+    <span class="bug-title">门禁编号体系不一致：SKILL.md 用"门禁1-4"，ORCHESTRATOR.md 用 G0/G8</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>SKILL.md</code> 第 79/122/273/299 行 vs <code>ORCHESTRATOR.md</code> 第 40/51/365 行 vs <code>progress.md</code> 第 20-22 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>人类审核门禁的编号在三个文件中不统一：</p>
+      <table>
+        <tr><th>文档</th><th>选题+大纲审核</th><th>前3章审核</th><th>中段转折</th><th>全书终审</th></tr>
+        <tr><td>SKILL.md</td><td>门禁 1</td><td>门禁 2</td><td>门禁 3</td><td>门禁 4</td></tr>
+        <tr><td>ORCHESTRATOR.md</td><td>G0</td><td>G8（强制）</td><td>无独立编号</td><td>G8（可选）</td></tr>
+        <tr><td>progress.md</td><td>门禁1</td><td>门禁2</td><td>-</td><td>-</td></tr>
+      </table>
+      <p>此外，SKILL.md 第 339 行称"G8 仅 4 个人工确认点"，但 ORCHESTRATOR.md 第 51 行定义 G8 为"人类终审（可选，默认跳过）"，两者对 G8 的定位矛盾。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>统一使用 ORCHESTRATOR.md 的 G0/G8 编号体系。修正 progress.md 模板中的"门禁1/门禁2"为"G0/G8"。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 09 ===== -->
+<div class="bug high" id="bug09">
+  <div class="bug-header">
+    <span class="bug-id">#09</span>
+    <span class="bug-title">00_INDEX.md 核心创意卡字段与 ORCHESTRATOR.md/SKILL.md 不匹配</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>00_INDEX.md</code> 第 13-18 行 vs <code>ORCHESTRATOR.md</code> 第 138-145 行 / <code>SKILL.md</code> 第 65-70 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>核心创意卡的 5 项字段在模板中与文档定义完全不同：</p>
+      <table>
+        <tr><th>序号</th><th>00_INDEX.md 模板</th><th>ORCHESTRATOR.md / SKILL.md</th></tr>
+        <tr><td>1</td><td>一句话概括</td><td>城市</td></tr>
+        <tr><td>2</td><td>核心卖点</td><td>行业</td></tr>
+        <tr><td>3</td><td>目标读者</td><td>核心能力/金手指</td></tr>
+        <tr><td>4</td><td>差异化标签</td><td>核心矛盾</td></tr>
+        <tr><td>5</td><td>爽点引擎</td><td>创意差异化</td></tr>
+      </table>
+      <p>执行者按模板填写后会漏掉"城市""行业"等关键设定，且 G6 门禁检查核心创意卡一致性时无法正确对齐。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>重写 00_INDEX.md 模板的核心创意卡区域，5 项改为：城市、行业、核心能力/金手指、核心矛盾、创意差异化。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 10 ===== -->
+<div class="bug high" id="bug10">
+  <div class="bug-header">
+    <span class="bug-id">#10</span>
+    <span class="bug-title">00_INDEX.md 静态文件名与实际文件名不匹配</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>00_INDEX.md</code> 第 30-34 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>00_INDEX.md 的静态文件索引表中使用了错误的文件名：</p>
+      <table>
+        <tr><th>00_INDEX.md 中的名称</th><th>实际文件名</th><th>引用方</th></tr>
+        <tr><td><code>static/topic-spec.md</code></td><td><code>static/topic.md</code></td><td>SKILL.md / ORCHESTRATOR.md</td></tr>
+        <tr><td><code>static/pacing-plan.md</code></td><td><code>static/pacing.md</code></td><td>SKILL.md / ORCHESTRATOR.md</td></tr>
+      </table>
+      <p>此外，索引表还遗漏了 <code>static/market_research.md</code> 和 <code>static/core_creative_card.md</code> 两个重要静态文件。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>将 00_INDEX.md 中的文件名修正为 <code>topic.md</code> 和 <code>pacing.md</code>，并补充遗漏的文件条目。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 11 ===== -->
+<div class="bug high" id="bug11">
+  <div class="bug-header">
+    <span class="bug-id">#11</span>
+    <span class="bug-title">00_INDEX.md 追踪表索引的读写时机与门禁定义矛盾</span>
+    <span class="badge high">High</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>00_INDEX.md</code> 第 66-74 行（追踪表索引）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>追踪表索引中的"读取时机"列引用了错误的门禁编号，与 ORCHESTRATOR.md 的门禁定义矛盾：</p>
+      <table>
+        <tr><th>文件</th><th>00_INDEX.md 读取时机</th><th>ORCHESTRATOR.md 实际读取时机</th></tr>
+        <tr><td>compliance-log.md</td><td>G2门禁</td><td>G4（平台规则门）</td></tr>
+        <tr><td>foreshadowing.md</td><td>G1/G3加载</td><td>G1（G3不加载伏笔）</td></tr>
+        <tr><td>established-facts.md</td><td>G1/G3加载</td><td>G1（G3不加载事实）</td></tr>
+        <tr><td>next-hook.md</td><td>G1/G3加载</td><td>G1（G3不加载钩子）</td></tr>
+      </table>
+      <p>由于 Bug#04 中 00_INDEX.md 的门禁定义本身就是错误的，这里的读写时机也跟着错位。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>在修复 Bug#04 的基础上，重新核填追踪表索引中的读写时机列，使其与 ORCHESTRATOR.md 各门禁章节一致。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 12 ===== -->
+<div class="bug medium" id="bug12">
+  <div class="bug-header">
+    <span class="bug-id">#12</span>
+    <span class="bug-title">feishu_sync.py --init 不支持 --name 参数</span>
+    <span class="badge medium">Medium</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>SKILL.md</code> 第 106 行 vs <code>tools/feishu_sync.py</code> 第 532-536 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>SKILL.md 指示执行如下命令：</p>
+      <pre>python tools/feishu_sync.py --init --name "[书名] 小说项目"</pre>
+      <p>但 feishu_sync.py 的 argparse 定义中<strong>没有 <code>--name</code> 参数</strong>，只有 <code>--init</code>、<code>--sync</code>、<code>--chapter</code>、<code>--trigger</code>、<code>--force</code>、<code>--status</code>。执行该命令会报错。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>在 feishu_sync.py 中添加 <code>--name</code> 可选参数，或在 SKILL.md 中去掉 <code>--name</code>。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 13 ===== -->
+<div class="bug medium" id="bug13">
+  <div class="bug-header">
+    <span class="bug-id">#13</span>
+    <span class="bug-title">feishu_sync.py --force 模式使用 trigger="force" 不在合法值集合中</span>
+    <span class="badge medium">Medium</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>tools/feishu_sync.py</code> 第 422 行（<code>sync_all_chapters</code> 函数）vs 第 51 行（<code>VALID_TRIGGERS</code>）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p><code>sync_all_chapters()</code> 函数在第 422 行调用 <code>sync_single_chapter(chapter_num, trigger="force", state=state)</code>，但 <code>"force"</code> 不在 <code>VALID_TRIGGERS = {"g4", "g7", "gate4", "gate7", "manual"}</code> 中。</p>
+      <p>这会导致每次强制全量同步时，每个章节都会触发警告：<code>"未知触发类型 'force'，使用默认 'manual'"</code>，虽然不阻塞但会产生大量噪音日志。</p>
+    </div>
+    <pre># 第 51 行
+VALID_TRIGGERS = {"g4", "g7", "gate4", "gate7", "manual"}
+
+# 第 422 行
+success = sync_single_chapter(chapter_num, trigger="force", state=state)  # "force" 不在集合中</pre>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>将 <code>"force"</code> 加入 <code>VALID_TRIGGERS</code> 集合，或将第 422 行的 <code>trigger="force"</code> 改为 <code>trigger="manual"</code>。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 14 ===== -->
+<div class="bug medium" id="bug14">
+  <div class="bug-header">
+    <span class="bug-id">#14</span>
+    <span class="bug-title">SKILL.md 声称 15 个动态轨文件但 G1 清单仅列 14 个文件</span>
+    <span class="badge medium">Medium</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>SKILL.md</code> 第 147 行（通过条件）vs 第 151-167 行（G1 清单表）</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p>SKILL.md 第 147 行写道"15 个动态轨文件全部读取"，但 G1 清单表的 15 行中，第 15 行是"组装章节卡"（一个操作步骤），而非文件读取。实际只列了 14 个文件。</p>
+      <p>ORCHESTRATOR.md 的 G1 清单（第 398-414 行）正确列出了 15 个文件。SKILL.md 的清单与 ORCHESTRATOR.md 的清单内容也不一致（见 Bug#07）。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>在 SKILL.md 的 G1 清单中补全遗漏的 5 个文件（见 Bug#07），并将第 15 项改为真正的文件或移除"组装章节卡"行。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BUG 15 ===== -->
+<div class="bug low" id="bug15">
+  <div class="bug-header">
+    <span class="bug-id">#15</span>
+    <span class="bug-title">metrics.py VAGUE_EMOTION_WORDS 存在重复词条</span>
+    <span class="badge low">Low</span>
+  </div>
+  <div class="bug-body">
+    <div class="field">
+      <div class="field-label">问题位置</div>
+      <div class="field-value"><code>tools/metrics.py</code> 第 45-59 行</div>
+    </div>
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <p><code>VAGUE_EMOTION_WORDS</code> 集合中存在重复词条：</p>
+      <ul style="padding-left:20px; margin:8px 0;">
+        <li><code>"愤怒"</code> 在第 46 行和第 50 行各出现一次</li>
+        <li><code>"厌恶"</code> 在第 50 行和第 58 行各出现一次</li>
+      </ul>
+      <p>由于使用 <code>set</code> 类型，重复不会导致运行时错误，但表示词库维护不够严谨，可能遗漏其他需要去重的场景。</p>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">修复建议</div>
+      <p>删除重复词条。建议添加一段自动化去重检查（如 <code>assert len(VAGUE_EMOTION_WORDS) == len(set(...))</code>）。</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:40px; padding:20px; background:#161b22; border:1px solid #30363d; border-radius:8px;">
+  <h2 style="color:#58a6ff; font-size:18px; margin-bottom:12px;">修复优先级建议</h2>
+  <ol style="padding-left:20px; color:#adbac7;">
+    <li><strong>第一批（阻断性）</strong>：Bug #01 + #02 — 修复 metrics.py 和 chapter-word-counter.py 的阈值，否则所有章节都无法正确通过门禁。</li>
+    <li><strong>第二批（一致性）</strong>：Bug #03 + #04 + #08 — 统一 G7 清单、00_INDEX.md 门禁定义、门禁编号体系。</li>
+    <li><strong>第三批（路径修复）</strong>：Bug #05 + #06 + #07 + #09 + #10 + #11 — 修复文件路径和清单不一致。</li>
+    <li><strong>第四批（代码修复）</strong>：Bug #12 + #13 + #14 + #15 — 修复 feishu_sync.py 参数问题和清单计数。</li>
+  </ol>
+</div>
+
+</div>
+</body>
+</html>
