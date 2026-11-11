@@ -1,0 +1,246 @@
+﻿{
+  "char_count": 1724,
+  "sentence_count": 91,
+  "paragraph_count": 44,
+  "metrics": {
+    "sigma2": 12.8,
+    "ttr": 0.51,
+    "psigma2": 34.8,
+    "burst_cv": 0.755,
+    "para_cv": 0.934,
+    "ngram3_rep": 0.0618,
+    "ngram3_uniq": 0.9088,
+    "egr": 1,
+    "csigma2": 0.15,
+    "isigma2": 5.36,
+    "dialog_ratio": 0.021,
+    "punct_cv": 0.551,
+    "telling_total": 3,
+    "telling_density": 0.033,
+    "telling_breakdown": {
+      "emotion_label": 0,
+      "think_verb": 0,
+      "filter_word": 0,
+      "weakening": 3,
+      "scene_summary": 0
+    },
+    "concreteness": 0,
+    "ai_pattern_total": 2,
+    "ai_pattern_density": 0.022,
+    "ai_pattern_breakdown": {
+      "vocab_sentence": 0,
+      "narrative": 0,
+      "pronoun_start": 0,
+      "adj_stacking": 2
+    },
+    "ai_pattern_hits": [
+      [
+        "形容词堆砌",
+        "3+形容词连续",
+        "命中2处"
+      ]
+    ]
+  },
+  "thresholds": {
+    "sigma2": {
+      "min": 8,
+      "ai": "<5",
+      "human": ">10"
+    },
+    "ttr": {
+      "min": 0.4,
+      "ai": "<0.30",
+      "human": ">0.48"
+    },
+    "psigma2": {
+      "min": 20,
+      "ai": "<12",
+      "human": ">28"
+    },
+    "burst_cv": {
+      "min": 0.4,
+      "ai": "<0.30",
+      "human": ">0.50"
+    },
+    "para_cv": {
+      "min": 0.3,
+      "ai": "<0.20",
+      "human": ">0.40"
+    },
+    "ngram3_rep": {
+      "max": 0.08,
+      "ai": ">0.10",
+      "human": "<0.06"
+    },
+    "ngram3_uniq": {
+      "min": 0.85,
+      "ai": "<0.70",
+      "human": ">0.90"
+    },
+    "egr": {
+      "max": 2.0,
+      "ai": ">5.0",
+      "human": "<1.0",
+      "reference": true
+    },
+    "csigma2": {
+      "min": 0.15,
+      "ai": "<0.05",
+      "human": ">0.25",
+      "reference": true
+    },
+    "isigma2": {
+      "min": 1.8,
+      "ai": "<1.0",
+      "human": ">2.5",
+      "reference": true
+    },
+    "dialog_ratio": {
+      "min": 0.05,
+      "max": 0.65,
+      "reference": true
+    },
+    "punct_cv": {
+      "min": 0.3,
+      "reference": true
+    },
+    "telling_total": {
+      "max": 5,
+      "ai": ">10",
+      "human": "<3",
+      "reference": true
+    },
+    "telling_density": {
+      "max": 0.15,
+      "ai": ">0.25",
+      "human": "<0.08",
+      "reference": true
+    },
+    "concreteness": {
+      "min": 1.0,
+      "ai": "<0.5",
+      "human": ">2.0",
+      "reference": true
+    },
+    "ai_pattern_total": {
+      "max": 3,
+      "ai": ">8",
+      "human": "<2",
+      "reference": true
+    },
+    "ai_pattern_density": {
+      "max": 0.05,
+      "ai": ">0.15",
+      "human": "<0.03",
+      "reference": true
+    },
+    "fp": {
+      "min": 2,
+      "ai": "=0",
+      "human": ">3"
+    },
+    "sc": {
+      "min": 0.75,
+      "ai": "<0.6",
+      "human": ">0.85"
+    }
+  },
+  "checks": {
+    "sigma2": {
+      "value": 12.8,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "ttr": {
+      "value": 0.51,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "psigma2": {
+      "value": 34.8,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "burst_cv": {
+      "value": 0.755,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "para_cv": {
+      "value": 0.934,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "ngram3_rep": {
+      "value": 0.0618,
+      "status": "✅ 达标",
+      "passed": true
+    },
+    "ngram3_uniq": {
+      "value": 0.9088,
+      "status": "✅ 人写区间",
+      "passed": true
+    },
+    "egr": {
+      "value": 1,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    },
+    "csigma2": {
+      "value": 0.15,
+      "status": "✅ 达标",
+      "passed": true,
+      "reference": true
+    },
+    "isigma2": {
+      "value": 5.36,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    },
+    "dialog_ratio": {
+      "value": 0.021,
+      "status": "ℹ️ 偏低",
+      "passed": false,
+      "reference": true
+    },
+    "punct_cv": {
+      "value": 0.551,
+      "status": "✅ 达标",
+      "passed": true,
+      "reference": true
+    },
+    "telling_total": {
+      "value": 3,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    },
+    "telling_density": {
+      "value": 0.033,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    },
+    "concreteness": {
+      "value": 0,
+      "status": "⚠️ AI区间(参考)",
+      "passed": true,
+      "reference": true
+    },
+    "ai_pattern_total": {
+      "value": 2,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    },
+    "ai_pattern_density": {
+      "value": 0.022,
+      "status": "✅ 人写区间",
+      "passed": true,
+      "reference": true
+    }
+  },
+  "corrections": []
+}

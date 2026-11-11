@@ -15,3 +15,9 @@ Thumbs.db
 
 # Oversized model file (exceeds GitHub 100 MiB limit)
 novel-system/tools/aitext_detector/models.json
+
+# ---- WorkBuddy 项目数据：仅共享 skills 目录，其余为本地个人数据，不入库 ----
+.workbuddy/*
+!.workbuddy/skills/
+# 技能内嵌的 ~107MB AI 检测权重不入库（需手动下载，见启动说明）
+.workbuddy/skills/novelOps/novel-system/tools/aitext_detector/models.json

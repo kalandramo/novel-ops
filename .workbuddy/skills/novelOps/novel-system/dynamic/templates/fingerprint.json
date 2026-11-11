@@ -1,0 +1,12 @@
+{
+  "_description": "语言指纹模板。用于描述角色的语言风格特征，指导写作时的语言模仿。character_name为角色名，phrases为口头禅/高频词汇，actions为标志性动作，style描述句式和感官偏好。",
+  "character_name": "待定",
+  "phrases": [],
+  "actions": [],
+  "style": {
+    "sentence_length": "短句为主，偶尔长句铺陈",
+    "paragraph_length": "短段为主，关键场景用长段",
+    "transition_usage": "极少用过渡词",
+    "sensory_preference": "触觉优先"
+  }
+}
